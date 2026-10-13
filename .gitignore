@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+
+# Environment and Data
+.env
+.uav_users.json
+.uav_queue.json
+.uav_settings.json
+.uav_secret_key
+.uav_web_downloader.log
+
+# Mount directories (if tested locally)
+downloads/
+media_library/
+video_output/
+
+# IDE & OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

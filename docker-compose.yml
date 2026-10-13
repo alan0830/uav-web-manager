@@ -1,0 +1,26 @@
+version: '3.8'
+
+services:
+  uav-web:
+    image: ghcr.io/alos21750/uav-downloader:latest
+    container_name: uav-web-downloader
+    restart: unless-stopped
+    ports:
+      - "8088:8080"
+    volumes:
+      # 下載暫存目錄（僅存放影片主檔）
+      - /volume1/xVideo/new:/downloads
+      # 刮削整理後的正式媒體庫目錄
+      - /volume1/xVideo/JAVDB_DATA:/media_library
+      # 網頁程式掛載
+      - ./app.py:/app/app.py
+    environment:
+      - DOWNLOAD_DIR=/downloads
+      - MEDIA_LIBRARY_DIR=/media_library
+      # 自動同步至網頁顯示的 NAS 實體目錄 (改這裡網頁就會自動跟著變動)
+      - HOST_DOWNLOAD_DIR=/volume1/xVideo/new
+      - HOST_MEDIA_DIR=/volume1/xVideo/JAVDB_DATA
+      - RESOLUTION=highest
+      - TZ=Asia/Taipei
+    # 容器啟動時自動安裝刮削、圖片處理與 Web 依賴
+    entrypoint: ["sh", "-c", "pip install --no-cache-dir flask beautifulsoup4 pillow requests && python -u /app/app.py"]
