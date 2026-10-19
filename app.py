@@ -28,23 +28,41 @@ except ImportError:
 # 容器內部目錄配置
 DOWNLOAD_DIR = os.getenv("DOWNLOAD_DIR", "/downloads")
 MEDIA_LIBRARY_DIR = os.getenv("MEDIA_LIBRARY_DIR", "/media_library")
+CONFIG_DIR = os.getenv("CONFIG_DIR", "/app/config")
 
 # 宿主機 (NAS) 動態路徑（供網頁動態呈現）
 HOST_DOWNLOAD_DIR = os.getenv("HOST_DOWNLOAD_DIR", DOWNLOAD_DIR)
 HOST_MEDIA_DIR = os.getenv("HOST_MEDIA_DIR", MEDIA_LIBRARY_DIR)
 
-QUEUE_FILE = os.path.join(DOWNLOAD_DIR, ".uav_queue.json")
-LOG_FILE = os.path.join(DOWNLOAD_DIR, ".uav_web_downloader.log")
-USERS_FILE = os.path.join(DOWNLOAD_DIR, ".uav_users.json")
-SECRET_KEY_FILE = os.path.join(DOWNLOAD_DIR, ".uav_secret_key")
-SETTINGS_FILE = os.path.join(DOWNLOAD_DIR, ".uav_settings.json")
+os.makedirs(DOWNLOAD_DIR, exist_ok=True)
+os.makedirs(MEDIA_LIBRARY_DIR, exist_ok=True)
+os.makedirs(CONFIG_DIR, exist_ok=True)
+
+# 系統持久化配置路徑（存於 CONFIG_DIR，對應 NAS 端的 ./config 目錄）
+QUEUE_FILE = os.path.join(CONFIG_DIR, "queue.json")
+LOG_FILE = os.path.join(CONFIG_DIR, "web_downloader.log")
+USERS_FILE = os.path.join(CONFIG_DIR, "users.json")
+SECRET_KEY_FILE = os.path.join(CONFIG_DIR, "secret_key")
+SETTINGS_FILE = os.path.join(CONFIG_DIR, "settings.json")
 
 MAX_GLOBAL_LOG_SIZE = 5 * 1024 * 1024
 KEEP_GLOBAL_LOG_SIZE = 2 * 1024 * 1024
 MAX_ITEM_LOG_LINES = 500
 
-os.makedirs(DOWNLOAD_DIR, exist_ok=True)
-os.makedirs(MEDIA_LIBRARY_DIR, exist_ok=True)
+# 向下相容遷移：若舊版本將設定與帳號寫在 DOWNLOAD_DIR 隱藏檔中，自動複製遷移至 CONFIG_DIR
+_OLD_TO_NEW_MIGRATIONS = [
+    (os.path.join(DOWNLOAD_DIR, ".uav_users.json"), USERS_FILE),
+    (os.path.join(DOWNLOAD_DIR, ".uav_secret_key"), SECRET_KEY_FILE),
+    (os.path.join(DOWNLOAD_DIR, ".uav_settings.json"), SETTINGS_FILE),
+    (os.path.join(DOWNLOAD_DIR, ".uav_queue.json"), QUEUE_FILE),
+    (os.path.join(DOWNLOAD_DIR, ".uav_web_downloader.log"), LOG_FILE),
+]
+for old_p, new_p in _OLD_TO_NEW_MIGRATIONS:
+    if os.path.exists(old_p) and not os.path.exists(new_p):
+        try:
+            shutil.copy2(old_p, new_p)
+        except Exception:
+            pass
 
 app = Flask(__name__)
 

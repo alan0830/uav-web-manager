@@ -83,6 +83,7 @@ services:
     environment:
       - DOWNLOAD_DIR=/downloads
       - MEDIA_LIBRARY_DIR=/media_library
+      - CONFIG_DIR=/app/config
       # 自動同步至網頁介面顯示的 NAS 實體路徑（請與上方 volumes 左側路徑保持一致）
       - HOST_DOWNLOAD_DIR=/volume1/video/downloads
       - HOST_MEDIA_DIR=/volume1/video/media_library
