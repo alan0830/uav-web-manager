@@ -690,6 +690,73 @@ def robust_browser_get(url, referer=None, timeout=12):
         s = get_browser_session()
         return s.get(url, headers=headers, timeout=timeout)
 
+# ==================== 女優頭像快取與查詢 ====================
+
+ACTRESS_AVATAR_CACHE = {
+    "森日向子": "https://www.javbus.com/pics/actress/wcd_a.jpg",
+    "楓カレン": "https://www.javbus.com/pics/actress/u4m_a.jpg",
+    "神木麗": "https://www.javbus.com/pics/actress/zh0_a.jpg",
+    "河北彩花": "https://www.javbus.com/pics/actress/sl1_a.jpg",
+    "五日市芽依": "https://www.javbus.com/pics/actress/10xw_a.jpg",
+    "涼森れむ": "https://www.javbus.com/pics/actress/uly_a.jpg",
+    "七瀬アリス": "https://www.javbus.com/pics/actress/wjv_a.jpg",
+    "楓ふうあ": "https://www.javbus.com/pics/actress/xog_a.jpg",
+    "白峰ミウ": "https://www.javbus.com/pics/actress/wyw_a.jpg",
+    "橘メアリー": "https://www.javbus.com/pics/actress/mr2_a.jpg",
+    "楪カレン": "https://www.javbus.com/pics/actress/x2w_a.jpg",
+    "北野未奈": "https://www.javbus.com/pics/actress/x86_a.jpg",
+    "三上悠亜": "https://www.javbus.com/pics/actress/okq_a.jpg",
+    "桃乃木かな": "https://www.javbus.com/pics/actress/p6v_a.jpg",
+    "森沢かな": "https://www.javbus.com/pics/actress/t54_a.jpg",
+    "美園和花": "https://www.javbus.com/pics/actress/s2i_a.jpg",
+    "桜空もも": "https://www.javbus.com/pics/actress/r62_a.jpg",
+    "波多野結衣": "https://www.javbus.com/pics/actress/2jv_a.jpg",
+    "深田えいみ": "https://www.javbus.com/pics/actress/tyv_a.jpg",
+    "篠田ゆう": "https://www.javbus.com/pics/actress/2pv_a.jpg",
+    "相沢みなみ": "https://www.javbus.com/pics/actress/qfy_a.jpg",
+    "明里つむぎ": "https://www.javbus.com/pics/actress/qs6_a.jpg",
+    "葵つかさ": "https://www.javbus.com/pics/actress/2xi_a.jpg",
+    "橋本ありな": "https://www.javbus.com/pics/actress/pmv_a.jpg",
+    "JULIA": "https://www.javbus.com/pics/actress/2de_a.jpg",
+    "天使もえ": "https://www.javbus.com/pics/actress/n5q_a.jpg",
+    "小野六花": "https://www.javbus.com/pics/actress/w6w_a.jpg",
+    "山手梨愛": "https://www.javbus.com/pics/actress/10gq_a.jpg",
+    "石川澪": "https://www.javbus.com/pics/actress/101l_a.jpg",
+    "八木奈々": "https://www.javbus.com/pics/actress/vve_a.jpg",
+}
+
+ACTRESS_CACHE_FILE = os.path.join(os.path.dirname(__file__), "actress_cache.json")
+if os.path.exists(ACTRESS_CACHE_FILE):
+    try:
+        with open(ACTRESS_CACHE_FILE, "r", encoding="utf-8") as f:
+            ACTRESS_AVATAR_CACHE.update(json.load(f))
+    except Exception:
+        pass
+
+def get_actress_avatar(name):
+    name_clean = name.strip()
+    if name_clean in ACTRESS_AVATAR_CACHE:
+        return ACTRESS_AVATAR_CACHE[name_clean]
+    for k, v in ACTRESS_AVATAR_CACHE.items():
+        if k in name_clean or name_clean in k:
+            return v
+    try:
+        q = urllib.parse.quote(name_clean)
+        r = robust_browser_get(f"https://www.javbus.com/searchstar/{q}", referer="https://www.javbus.com/", timeout=4)
+        if r.status_code == 200:
+            soup = BeautifulSoup(r.text, "html.parser")
+            box = soup.select_one("a.avatar-box")
+            img = box.find("img") if box else None
+            if img and img.get("src"):
+                src = img["src"]
+                if not src.startswith("http"):
+                    src = "https://www.javbus.com" + src
+                ACTRESS_AVATAR_CACHE[name_clean] = src
+                return src
+    except Exception:
+        pass
+    return ""
+
 def fetch_jable_videos(cat="today-hot", page=1):
     urls = {
         "today-hot": "https://jable.tv/hot/",
@@ -789,6 +856,8 @@ def fetch_jable_actresses(page=1):
             sub_el = box.find("span")
             name = title_el.text.strip() if title_el else a.text.strip()
             avatar = img.get("data-src") or img.get("src") if img else ""
+            if not avatar:
+                avatar = get_actress_avatar(name)
             sub = sub_el.text.strip() if sub_el else ""
             if name and a["href"] != "https://jable.tv/models/":
                 actresses.append({
@@ -1081,30 +1150,31 @@ def search_supjav_videos(query, page=1):
         return []
 
 def fetch_supjav_actresses(page=1):
-    url = "https://supjav.com/cast"
-    try:
-        r = robust_browser_get(url, timeout=12)
-        if r.status_code != 200:
-            return []
-        soup = BeautifulSoup(r.text, "html.parser")
-        actresses = []
-        for a in soup.select("a[href*='/category/cast/']"):
-            name_raw = a.text.strip()
-            href = a.get("href", "")
-            if name_raw and href:
-                actresses.append({
-                    "name": name_raw,
-                    "url": href,
-                    "avatar": "",
-                    "video_count": "",
-                    "source": "SupJav"
-                })
-        return actresses[:50]
-    except Exception as e:
-        log_global(f"SupJav 女優清單抓取失敗: {e}")
-        return []
+    # 精選高人氣女優清單，並關聯至 SupJav 該女優的影片庫
+    popular_actresses = [
+        "三上悠亜", "河北彩花", "波多野結衣", "深田えいみ", "桃乃木かな", 
+        "篠田ゆう", "桜空もも", "明里つむぎ", "相沢みなみ", "葵つかさ", 
+        "橋本ありな", "涼森れむ", "神木麗", "森日向子", "楓カレン", 
+        "五日市芽依", "七瀬アリス", "楓ふうあ", "白峰ミウ", "橘メアリー", 
+        "楪カレン", "北野未奈", "天使もえ", "山手梨愛", "石川澪", "八木奈々"
+    ]
+    results = []
+    for name in popular_actresses:
+        avatar = get_actress_avatar(name)
+        q = urllib.parse.quote(name)
+        results.append({
+            "name": name,
+            "url": f"https://supjav.com/?s={q}",
+            "avatar": avatar,
+            "video_count": "熱門作品",
+            "source": "SupJav"
+        })
+    return results
 
 def fetch_supjav_actress_videos(actress_url, page=1):
+    if "?s=" in actress_url or "&s=" in actress_url:
+        q = urllib.parse.unquote(actress_url.split("?s=")[-1].split("&")[0])
+        return search_supjav_videos(q, page)
     url = actress_url
     if page > 1:
         url = f"{url.rstrip('/')}/page/{page}"
@@ -3279,6 +3349,8 @@ def api_explore_proxy_image():
         referer = "https://jable.tv/"
     elif "supjav" in img_url:
         referer = "https://supjav.com/"
+    elif "javbus" in img_url:
+        referer = "https://www.javbus.com/"
     elif "fourhoi" in img_url or "missav" in img_url:
         referer = "https://missav.ai/"
     else:
