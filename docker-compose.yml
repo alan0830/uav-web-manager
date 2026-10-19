@@ -2,24 +2,24 @@ version: '3.8'
 
 services:
   uav-web:
-    # 官方全封裝映像檔（自動包含 Web 管理、影音探索、女優庫與 Cloudflare 繞過引擎）
+    # 官方全封裝映像檔（已內建 Web 管理介面、影音探索、女優庫與 Cloudflare 繞過引擎）
     image: alantsai0830/uav-web-manager:latest
     container_name: uav-web-downloader
     restart: unless-stopped
     ports:
       - "8088:8080"
     volumes:
-      # 下載暫存目錄（僅存放影片主檔）
-      - /volume1/xVideo/new:/downloads
-      # 刮削整理後的正式媒體庫目錄
-      - /volume1/xVideo/JAVDB_DATA:/media_library
-      # 系統配置與帳號持久化目錄
+      # 下載暫存目錄（請替換為您 NAS 上的實際下載資料夾）
+      - /volume1/video/downloads:/downloads
+      # 刮削整理後的正式媒體庫目錄（請替換為您 NAS 上的實際媒體庫資料夾）
+      - /volume1/video/media_library:/media_library
+      # 系統配置與帳號持久化目錄（存放登入密鑰與自訂命名規則）
       - ./config:/app/config
     environment:
       - DOWNLOAD_DIR=/downloads
       - MEDIA_LIBRARY_DIR=/media_library
-      # 自動同步至網頁顯示的 NAS 實體目錄 (改這裡網頁就會自動跟著變動)
-      - HOST_DOWNLOAD_DIR=/volume1/xVideo/new
-      - HOST_MEDIA_DIR=/volume1/xVideo/JAVDB_DATA
+      # 自動同步至網頁介面顯示的 NAS 實體路徑（請與上方 volumes 左側路徑保持一致）
+      - HOST_DOWNLOAD_DIR=/volume1/video/downloads
+      - HOST_MEDIA_DIR=/volume1/video/media_library
       - RESOLUTION=highest
       - TZ=Asia/Taipei
