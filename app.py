@@ -1916,6 +1916,68 @@ div.desktop-only { display: block; }
   color: #718096;
 }
 
+/* 分頁導航控制條 */
+.pagination-bar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  margin: 24px 0 12px 0;
+  padding: 12px 16px;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+}
+.btn-page {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px 18px;
+  background: #ffffff;
+  color: #2b6cb0;
+  border: 1px solid #cbd5e0;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  user-select: none;
+}
+.btn-page:hover:not(:disabled) {
+  background: #2b6cb0;
+  color: #ffffff;
+  border-color: #2b6cb0;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 6px -1px rgba(43, 108, 176, 0.2);
+}
+.btn-page:active:not(:disabled) {
+  transform: translateY(0);
+}
+.btn-page:disabled {
+  background: #edf2f7;
+  color: #a0aec0;
+  border-color: #e2e8f0;
+  cursor: not-allowed;
+  opacity: 0.6;
+  box-shadow: none;
+}
+.page-indicator {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 80px;
+  padding: 7px 16px;
+  background: #ebf8ff;
+  color: #2b6cb0;
+  border-radius: 20px;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  border: 1px solid #bee3f8;
+}
+
 /* Toast 提示 */
 .toast-msg {
   position: fixed;
@@ -2055,6 +2117,11 @@ div.desktop-only { display: block; }
     <div id="trending-grid" class="media-grid">
       <div style="grid-column: 1 / -1; text-align: center; color: #a0aec0; padding: 40px;">載入影片中...</div>
     </div>
+    <div id="trending-pagination" class="pagination-bar" style="display:none;">
+      <button type="button" id="trending-prev-btn" class="btn-page" onclick="changeTrendingPage(-1)" disabled>❮ 上一頁</button>
+      <span id="trending-page-num" class="page-indicator">第 1 頁</span>
+      <button type="button" id="trending-next-btn" class="btn-page" onclick="changeTrendingPage(1)">下一頁 ❯</button>
+    </div>
   </div>
 
   <!-- 2. 人氣女優面板 -->
@@ -2067,16 +2134,26 @@ div.desktop-only { display: block; }
       <div style="grid-column: 1 / -1; text-align: center; color: #a0aec0; padding: 40px;">載入女優列表中...</div>
     </div>
     <div id="actress-videos-grid" class="media-grid" style="display:none;"></div>
+    <div id="actress-pagination" class="pagination-bar" style="display:none;">
+      <button type="button" id="actress-prev-btn" class="btn-page" onclick="changeActressVideosPage(-1)" disabled>❮ 上一頁</button>
+      <span id="actress-page-num" class="page-indicator">第 1 頁</span>
+      <button type="button" id="actress-next-btn" class="btn-page" onclick="changeActressVideosPage(1)">下一頁 ❯</button>
+    </div>
   </div>
 
   <!-- 3. 關鍵字搜尋面板 -->
   <div id="panel-search" style="display: none;">
     <div style="display:flex;gap:8px;margin-bottom:14px;">
-      <input type="text" id="explore-search-input" placeholder="輸入番號 (如 SSIS-001)、女優名或關鍵字..." onkeydown="if(event.key==='Enter') executeExploreSearch()" style="flex:1;">
-      <button type="button" class="btn-primary" onclick="executeExploreSearch()" style="min-width:80px;">🔍 搜尋</button>
+      <input type="text" id="explore-search-input" placeholder="輸入番號 (如 SSIS-001)、女優名或關鍵字..." onkeydown="if(event.key==='Enter') executeExploreSearch(true)" style="flex:1;">
+      <button type="button" class="btn-primary" onclick="executeExploreSearch(true)" style="min-width:80px;">🔍 搜尋</button>
     </div>
     <div id="search-grid" class="media-grid">
       <div style="grid-column: 1 / -1; text-align: center; color: #a0aec0; padding: 40px;">請在上方輸入關鍵字開始搜尋</div>
+    </div>
+    <div id="search-pagination" class="pagination-bar" style="display:none;">
+      <button type="button" id="search-prev-btn" class="btn-page" onclick="changeSearchPage(-1)" disabled>❮ 上一頁</button>
+      <span id="search-page-num" class="page-indicator">第 1 頁</span>
+      <button type="button" id="search-next-btn" class="btn-page" onclick="changeSearchPage(1)">下一頁 ❯</button>
     </div>
   </div>
 
@@ -2626,6 +2703,13 @@ let exploreCategory = 'today-hot';
 const exploreSelectedUrls = new Set();
 let loadedActresses = false;
 
+// 分頁導航狀態
+let exploreTrendingPage = 1;
+let exploreSearchPage = 1;
+let exploreActressVideosPage = 1;
+let currentActressUrl = '';
+let currentActressName = '';
+
 function showToast(msg) {
   const t = document.getElementById("toast");
   if (!t) return;
@@ -2668,6 +2752,10 @@ function getActressInitial(name) {
 
 function setExploreSource(src) {
   exploreSource = src;
+  exploreTrendingPage = 1;
+  exploreSearchPage = 1;
+  exploreActressVideosPage = 1;
+
   document.getElementById("src-jable").classList.toggle("active", src === "jable");
   document.getElementById("src-missav").classList.toggle("active", src === "missav");
   const sjBtn = document.getElementById("src-supjav");
@@ -2679,37 +2767,82 @@ function setExploreSource(src) {
     loadedActresses = false;
     loadExploreActresses();
   } else if (exploreTab === "search") {
-    executeExploreSearch();
+    const q = document.getElementById("explore-search-input").value.trim();
+    if (q) executeExploreSearch(true);
   }
 }
 
 function setCategory(cat, btnEl) {
   exploreCategory = cat;
+  exploreTrendingPage = 1;
   document.querySelectorAll(".cat-pill").forEach(p => p.classList.remove("active"));
   btnEl.classList.add("active");
   loadExploreTrending();
 }
 
-async function loadExploreTrending() {
+async function loadExploreTrending(page = null) {
+  if (page !== null) exploreTrendingPage = page;
+  if (exploreTrendingPage < 1) exploreTrendingPage = 1;
+
   const container = document.getElementById("trending-grid");
+  const pagBar = document.getElementById("trending-pagination");
+  const prevBtn = document.getElementById("trending-prev-btn");
+  const nextBtn = document.getElementById("trending-next-btn");
+  const pageNum = document.getElementById("trending-page-num");
+
+  if (pageNum) pageNum.innerText = `第 ${exploreTrendingPage} 頁`;
+  if (prevBtn) prevBtn.disabled = (exploreTrendingPage <= 1);
+  if (nextBtn) nextBtn.disabled = true;
+
   const sName = getSourceDisplayName(exploreSource);
-  container.innerHTML = `<div style="grid-column: 1 / -1; text-align: center; color: #a0aec0; padding: 40px;">正在抓取 ${sName} 最新熱門影片...</div>`;
+  container.innerHTML = `<div style="grid-column: 1 / -1; text-align: center; color: #a0aec0; padding: 40px;">正在抓取 ${sName} 第 ${exploreTrendingPage} 頁影片...</div>`;
+
   try {
-    const res = await fetch(`/api/explore/videos?source=${exploreSource}&cat=${exploreCategory}`);
+    const res = await fetch(`/api/explore/videos?source=${exploreSource}&cat=${exploreCategory}&page=${exploreTrendingPage}`);
     const data = await res.json();
-    renderMediaCards("trending-grid", data.videos || []);
+    const videos = data.videos || [];
+
+    if (videos.length === 0 && exploreTrendingPage > 1) {
+      container.innerHTML = `
+        <div style="grid-column: 1 / -1; text-align: center; color: #718096; padding: 40px;">
+          <div style="font-size:16px;font-weight:600;margin-bottom:12px;">第 ${exploreTrendingPage} 頁已無更多影片</div>
+          <button type="button" class="btn-primary" style="padding:6px 16px;" onclick="changeTrendingPage(-1)">❮ 返回上一頁</button>
+        </div>
+      `;
+      if (pagBar) pagBar.style.display = "flex";
+      if (prevBtn) prevBtn.disabled = false;
+      if (nextBtn) nextBtn.disabled = true;
+      return;
+    }
+
+    renderMediaCards("trending-grid", videos);
+    if (pagBar) pagBar.style.display = videos.length > 0 ? "flex" : "none";
+    if (prevBtn) prevBtn.disabled = (exploreTrendingPage <= 1);
+    if (nextBtn) nextBtn.disabled = (videos.length === 0);
   } catch(e) {
     container.innerHTML = `<div style="grid-column: 1 / -1; text-align: center; color: #e53e3e; padding: 30px;">載入失敗: ${escapeHtml(e)}</div>`;
+    if (pagBar) pagBar.style.display = "none";
   }
+}
+
+function changeTrendingPage(delta) {
+  const newPage = exploreTrendingPage + delta;
+  if (newPage < 1) return;
+  exploreTrendingPage = newPage;
+  const panel = document.getElementById("panel-trending");
+  if (panel) panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  loadExploreTrending();
 }
 
 async function loadExploreActresses() {
   const container = document.getElementById("actress-grid");
+  const pagBar = document.getElementById("actress-pagination");
   const sName = getSourceDisplayName(exploreSource);
   container.innerHTML = `<div style="grid-column: 1 / -1; text-align: center; color: #a0aec0; padding: 40px;">正在加載 ${sName} 人氣女優榜...</div>`;
   document.getElementById("actress-breadcrumb").style.display = "none";
   document.getElementById("actress-grid").style.display = "grid";
   document.getElementById("actress-videos-grid").style.display = "none";
+  if (pagBar) pagBar.style.display = "none";
 
   try {
     const res = await fetch(`/api/explore/actresses?source=${exploreSource}`);
@@ -2733,7 +2866,7 @@ async function loadExploreActresses() {
         <div class="actress-name" title="${escapeHtml(act.name)}">${escapeHtml(act.name)}</div>
         <div class="actress-count">${escapeHtml(act.video_count || '')}</div>
       `;
-      card.onclick = () => exploreActressVideos(act.url, act.name);
+      card.onclick = () => exploreActressVideos(act.url, act.name, true);
       container.appendChild(card);
     }
     loadedActresses = true;
@@ -2742,45 +2875,132 @@ async function loadExploreActresses() {
   }
 }
 
-async function exploreActressVideos(actressUrl, actressName) {
+async function exploreActressVideos(actressUrl, actressName, resetPage = true) {
+  if (resetPage) exploreActressVideosPage = 1;
+  if (exploreActressVideosPage < 1) exploreActressVideosPage = 1;
+  if (actressUrl) currentActressUrl = actressUrl;
+  if (actressName) currentActressName = actressName;
+
   document.getElementById("actress-grid").style.display = "none";
   document.getElementById("actress-breadcrumb").style.display = "flex";
-  document.getElementById("current-actress-title").innerText = actressName;
+  document.getElementById("current-actress-title").innerText = currentActressName;
+  
   const vGrid = document.getElementById("actress-videos-grid");
+  const pagBar = document.getElementById("actress-pagination");
+  const prevBtn = document.getElementById("actress-prev-btn");
+  const nextBtn = document.getElementById("actress-next-btn");
+  const pageNum = document.getElementById("actress-page-num");
+
   vGrid.style.display = "grid";
-  vGrid.innerHTML = `<div style="grid-column: 1 / -1; text-align: center; color: #a0aec0; padding: 40px;">正在載入 ${escapeHtml(actressName)} 的專屬作品...</div>`;
+  vGrid.innerHTML = `<div style="grid-column: 1 / -1; text-align: center; color: #a0aec0; padding: 40px;">正在載入 ${escapeHtml(currentActressName)} 第 ${exploreActressVideosPage} 頁專屬作品...</div>`;
+
+  if (pageNum) pageNum.innerText = `第 ${exploreActressVideosPage} 頁`;
+  if (prevBtn) prevBtn.disabled = (exploreActressVideosPage <= 1);
+  if (nextBtn) nextBtn.disabled = true;
 
   try {
-    const res = await fetch(`/api/explore/actress_videos?source=${exploreSource}&url=${encodeURIComponent(actressUrl)}`);
+    const res = await fetch(`/api/explore/actress_videos?source=${exploreSource}&url=${encodeURIComponent(currentActressUrl)}&page=${exploreActressVideosPage}`);
     const data = await res.json();
-    renderMediaCards("actress-videos-grid", data.videos || []);
+    const videos = data.videos || [];
+
+    if (videos.length === 0 && exploreActressVideosPage > 1) {
+      vGrid.innerHTML = `
+        <div style="grid-column: 1 / -1; text-align: center; color: #718096; padding: 40px;">
+          <div style="font-size:16px;font-weight:600;margin-bottom:12px;">第 ${exploreActressVideosPage} 頁已無更多作品</div>
+          <button type="button" class="btn-primary" style="padding:6px 16px;" onclick="changeActressVideosPage(-1)">❮ 返回上一頁</button>
+        </div>
+      `;
+      if (pagBar) pagBar.style.display = "flex";
+      if (prevBtn) prevBtn.disabled = false;
+      if (nextBtn) nextBtn.disabled = true;
+      return;
+    }
+
+    renderMediaCards("actress-videos-grid", videos);
+    if (pagBar) pagBar.style.display = videos.length > 0 ? "flex" : "none";
+    if (prevBtn) prevBtn.disabled = (exploreActressVideosPage <= 1);
+    if (nextBtn) nextBtn.disabled = (videos.length === 0);
   } catch(e) {
     vGrid.innerHTML = `<div style="grid-column: 1 / -1; text-align: center; color: #e53e3e; padding: 30px;">作品載入失敗: ${escapeHtml(e)}</div>`;
+    if (pagBar) pagBar.style.display = "none";
   }
+}
+
+function changeActressVideosPage(delta) {
+  const newPage = exploreActressVideosPage + delta;
+  if (newPage < 1) return;
+  exploreActressVideosPage = newPage;
+  const panel = document.getElementById("panel-actresses");
+  if (panel) panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  exploreActressVideos(currentActressUrl, currentActressName, false);
 }
 
 function backToActressList() {
   document.getElementById("actress-grid").style.display = "grid";
   document.getElementById("actress-breadcrumb").style.display = "none";
   document.getElementById("actress-videos-grid").style.display = "none";
+  const pagBar = document.getElementById("actress-pagination");
+  if (pagBar) pagBar.style.display = "none";
+  exploreActressVideosPage = 1;
 }
 
-async function executeExploreSearch() {
+async function executeExploreSearch(resetPage = false) {
   const query = document.getElementById("explore-search-input").value.trim();
   if (!query) {
     alert("請輸入搜尋關鍵字！");
     return;
   }
+  if (resetPage) exploreSearchPage = 1;
+  if (exploreSearchPage < 1) exploreSearchPage = 1;
+
   const container = document.getElementById("search-grid");
-  container.innerHTML = `<div style="grid-column: 1 / -1; text-align: center; color: #a0aec0; padding: 40px;">正在多站搜尋「${escapeHtml(query)}」...</div>`;
+  const pagBar = document.getElementById("search-pagination");
+  const prevBtn = document.getElementById("search-prev-btn");
+  const nextBtn = document.getElementById("search-next-btn");
+  const pageNum = document.getElementById("search-page-num");
+
+  if (pageNum) pageNum.innerText = `第 ${exploreSearchPage} 頁`;
+  if (prevBtn) prevBtn.disabled = (exploreSearchPage <= 1);
+  if (nextBtn) nextBtn.disabled = true;
+
+  const sName = getSourceDisplayName(exploreSource);
+  container.innerHTML = `<div style="grid-column: 1 / -1; text-align: center; color: #a0aec0; padding: 40px;">正在 ${sName} 搜尋「${escapeHtml(query)}」第 ${exploreSearchPage} 頁...</div>`;
 
   try {
-    const res = await fetch(`/api/explore/search?source=${exploreSource}&query=${encodeURIComponent(query)}`);
+    const res = await fetch(`/api/explore/search?source=${exploreSource}&query=${encodeURIComponent(query)}&page=${exploreSearchPage}`);
     const data = await res.json();
-    renderMediaCards("search-grid", data.videos || []);
+    const videos = data.videos || [];
+
+    if (videos.length === 0 && exploreSearchPage > 1) {
+      container.innerHTML = `
+        <div style="grid-column: 1 / -1; text-align: center; color: #718096; padding: 40px;">
+          <div style="font-size:16px;font-weight:600;margin-bottom:12px;">第 ${exploreSearchPage} 頁已無更多搜尋結果</div>
+          <button type="button" class="btn-primary" style="padding:6px 16px;" onclick="changeSearchPage(-1)">❮ 返回上一頁</button>
+        </div>
+      `;
+      if (pagBar) pagBar.style.display = "flex";
+      if (prevBtn) prevBtn.disabled = false;
+      if (nextBtn) nextBtn.disabled = true;
+      return;
+    }
+
+    renderMediaCards("search-grid", videos);
+    if (pagBar) pagBar.style.display = videos.length > 0 ? "flex" : "none";
+    if (prevBtn) prevBtn.disabled = (exploreSearchPage <= 1);
+    if (nextBtn) nextBtn.disabled = (videos.length === 0);
   } catch(e) {
     container.innerHTML = `<div style="grid-column: 1 / -1; text-align: center; color: #e53e3e; padding: 30px;">搜尋失敗: ${escapeHtml(e)}</div>`;
+    if (pagBar) pagBar.style.display = "none";
   }
+}
+
+function changeSearchPage(delta) {
+  const newPage = exploreSearchPage + delta;
+  if (newPage < 1) return;
+  exploreSearchPage = newPage;
+  const panel = document.getElementById("panel-search");
+  if (panel) panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  executeExploreSearch(false);
 }
 
 function renderMediaCards(containerId, videos) {
