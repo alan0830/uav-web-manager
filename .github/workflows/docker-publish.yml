@@ -22,7 +22,7 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      # 登入 GitHub Container Registry (免額外密碼設定)
+      # 1. 登入 GitHub Packages (GHCR)
       - name: Log in to GitHub Packages (GHCR)
         uses: docker/login-action@v3
         with:
@@ -30,32 +30,30 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # 若有設定 Docker Hub 密鑰，自動登入 Docker Hub
+      # 2. 若有設定 Docker Hub 密鑰，登入 Docker Hub
       - name: Log in to Docker Hub
-        if: "${{ secrets.DOCKERHUB_USERNAME != '' && secrets.DOCKERHUB_TOKEN != '' }}"
+        if: "${{ secrets.DOCKERHUB_USERNAME != '' }}"
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      # 計算要推送的 Image Tags
-      - name: Extract Docker metadata
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: |
-            ghcr.io/${{ github.repository }}
-            ${{ secrets.DOCKERHUB_USERNAME && format('{0}/uav-web-manager', secrets.DOCKERHUB_USERNAME) || '' }}
-          tags: |
-            type=raw,value=latest
-            type=sha,format=short
+      # 3. 組合要推送的 Tags
+      - name: Determine Docker Image Tags
+        id: tags
+        run: |
+          TAGS="ghcr.io/${{ github.repository }}:latest"
+          if [ -n "${{ secrets.DOCKERHUB_USERNAME }}" ]; then
+            TAGS="$TAGS,${{ secrets.DOCKERHUB_USERNAME }}/uav-web-manager:latest"
+          fi
+          echo "tags=$TAGS" >> $GITHUB_OUTPUT
 
+      # 4. 編譯並推送到 Docker Hub 與 GHCR
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
         with:
           context: .
           file: ./Dockerfile
           push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          tags: ${{ steps.tags.outputs.tags }}
           platforms: linux/amd64
