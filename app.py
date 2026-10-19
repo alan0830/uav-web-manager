@@ -775,6 +775,74 @@ def get_actress_avatar(name):
         pass
     return ""
 
+# ==================== 線上探索女優名稱擷取工具 ====================
+
+IGNORE_ACTRESS_WORDS = {
+    '中文字幕', '中文', '字幕', '無碼', '有碼', '流出', '破解', '無碼流出', '獨家', '高清', 
+    'HD', '4K', 'FHD', 'VR', 'SUB', 'UNCENSORED', 'LEAK', 'CHINESE', 'PART', 'VOL',
+    '特別篇', '精選', '合集', 'BEST', '完全版', '總集編', '總集篇', '記念', '周年',
+    'DOWNLOAD', 'STREAM', 'JAV', 'FC2', 'PPV', 'FC2-PPV', 'NEW', 'PREVIEW',
+    '素人', '個人攝影', '初回', '限定', '特惠', '高畫質', '附特典', '720P', '1080P'
+}
+
+def clean_actress_name(name):
+    if not name:
+        return ""
+    name = re.sub(r'^[・·\s\-_/／\(\)（）\[\]【】]+|[・·\s\-_/／\(\)（）\[\]【】]+$', '', name).strip()
+    if name.upper() in IGNORE_ACTRESS_WORDS:
+        return ""
+    if re.search(r'^[0-9\s\.\-:]+$', name):
+        return ""
+    if any(c in name for c in ['！', '!', '？', '?', '。', '…', '，', ',', '篇', '版', '集', '話']):
+        return ""
+    if re.search(r'\d+[年月日號号]', name):
+        return ""
+    if len(name) < 2 or len(name) > 20:
+        return ""
+    return name
+
+def extract_actress_from_title(title, code=""):
+    if not title:
+        return ""
+    t = title.strip()
+    if code:
+        code_pat = re.escape(code.strip())
+        t = re.sub(rf'^{code_pat}\s*', '', t, flags=re.I).strip()
+    t = re.sub(r'^[\[【][^\]】]+[\]】]\s*', '', t).strip()
+
+    cand_bracket = ""
+    while True:
+        m_tag = re.search(r'[\[【（\(]([^\]】）\)]+)[\]】）\)]\s*$', t)
+        if not m_tag:
+            break
+        inside = m_tag.group(1).strip()
+        t = t[:m_tag.start()].strip()
+        cleaned_inside = clean_actress_name(inside)
+        if cleaned_inside:
+            cand_bracket = cleaned_inside
+
+    if cand_bracket:
+        return cand_bracket
+
+    m_sep = re.search(r'[-－—–~～/／]\s*([^\-－—–~～/／（）\(\)\[\]]{2,20})\s*$', t)
+    if m_sep:
+        cand = clean_actress_name(m_sep.group(1))
+        if cand:
+            return cand
+
+    parts = t.split()
+    if len(parts) >= 2:
+        last = clean_actress_name(parts[-1])
+        if last and re.search(r'[\u4e00-\u9fff\u3040-\u30ff]', last):
+            return last
+
+    if ACTRESS_AVATAR_CACHE:
+        for act_name in ACTRESS_AVATAR_CACHE:
+            if len(act_name) >= 2 and act_name in t:
+                return act_name
+
+    return ""
+
 def fetch_jable_videos(cat="today-hot", page=1):
     urls = {
         "today-hot": "https://jable.tv/hot/",
@@ -806,9 +874,11 @@ def fetch_jable_videos(cat="today-hot", page=1):
             title = title_el.text.strip() if title_el else ""
             dur = dur_el.text.strip() if dur_el else ""
             mid = v_url.rstrip("/").split("/")[-1].upper()
+            actress = extract_actress_from_title(title, mid)
             results.append({
                 "id": mid,
                 "title": title,
+                "actress": actress,
                 "url": v_url,
                 "cover": cover,
                 "duration": dur,
@@ -842,9 +912,11 @@ def search_jable_videos(query, page=1):
             title = title_el.text.strip() if title_el else ""
             dur = dur_el.text.strip() if dur_el else ""
             mid = v_url.rstrip("/").split("/")[-1].upper()
+            actress = extract_actress_from_title(title, mid)
             results.append({
                 "id": mid,
                 "title": title,
+                "actress": actress,
                 "url": v_url,
                 "cover": cover,
                 "duration": dur,
@@ -913,9 +985,11 @@ def fetch_jable_actress_videos(actress_url, page=1):
             title = title_el.text.strip() if title_el else ""
             dur = dur_el.text.strip() if dur_el else ""
             mid = v_url.rstrip("/").split("/")[-1].upper()
+            actress = extract_actress_from_title(title, mid)
             results.append({
                 "id": mid,
                 "title": title,
+                "actress": actress,
                 "url": v_url,
                 "cover": cover,
                 "duration": dur,
@@ -958,9 +1032,11 @@ def fetch_missav_videos(cat="today-hot", page=1):
             title = title_link.text.strip() if title_link else (img.get("alt") if img else "")
             dur = dur_el.text.strip() if dur_el else ""
             mid = v_url.rstrip("/").split("/")[-1].upper()
+            actress = extract_actress_from_title(title, mid)
             results.append({
                 "id": mid,
                 "title": title,
+                "actress": actress,
                 "url": v_url,
                 "cover": cover,
                 "duration": dur,
@@ -995,9 +1071,11 @@ def search_missav_videos(query, page=1):
             title = title_link.text.strip() if title_link else (img.get("alt") if img else "")
             dur = dur_el.text.strip() if dur_el else ""
             mid = v_url.rstrip("/").split("/")[-1].upper()
+            actress = extract_actress_from_title(title, mid)
             results.append({
                 "id": mid,
                 "title": title,
+                "actress": actress,
                 "url": v_url,
                 "cover": cover,
                 "duration": dur,
@@ -1076,9 +1154,11 @@ def fetch_missav_actress_videos(actress_url, page=1):
             title = title_link.text.strip() if title_link else (img.get("alt") if img else "")
             dur = dur_el.text.strip() if dur_el else ""
             mid = v_url.rstrip("/").split("/")[-1].upper()
+            actress = extract_actress_from_title(title, mid)
             results.append({
                 "id": mid,
                 "title": title,
+                "actress": actress,
                 "url": v_url,
                 "cover": cover,
                 "duration": dur,
@@ -1114,9 +1194,11 @@ def parse_supjav_posts(soup):
             elif len(parts) >= 1:
                 code = parts[0]
 
+        actress = extract_actress_from_title(title, code)
         results.append({
             "id": code,
             "title": title,
+            "actress": actress,
             "url": href,
             "cover": cover,
             "duration": "",
@@ -1838,14 +1920,44 @@ div.desktop-only { display: block; }
   flex-direction: column;
   flex: 1;
 }
-.media-card-code {
-  font-size: 11px;
-  font-weight: bold;
-  color: #2b6cb0;
-  margin-bottom: 4px;
-  text-overflow: ellipsis;
+.media-card-code-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 5px;
   overflow: hidden;
   white-space: nowrap;
+}
+.media-card-code {
+  font-size: 11px;
+  font-weight: 700;
+  color: #2b6cb0;
+  flex-shrink: 0;
+  letter-spacing: 0.3px;
+}
+.media-card-actress {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: #d53f8c;
+  background: #fff5f7;
+  border: 1px solid #fed7e2;
+  padding: 1px 7px;
+  border-radius: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.media-card-actress:hover {
+  background: #fed7e2;
+  color: #97266d;
+  border-color: #fbb6ce;
+  transform: translateY(-1px);
 }
 .media-card-title {
   font-size: 13px;
@@ -2920,6 +3032,11 @@ async function exploreActressVideos(actressUrl, actressName, resetPage = true) {
     const res = await fetch(`/api/explore/actress_videos?source=${exploreSource}&url=${encodeURIComponent(currentActressUrl)}&page=${exploreActressVideosPage}`);
     const data = await res.json();
     const videos = data.videos || [];
+    for (const v of videos) {
+      if (!v.actress && currentActressName) {
+        v.actress = currentActressName;
+      }
+    }
 
     if (videos.length === 0 && exploreActressVideosPage > 1) {
       vGrid.innerHTML = `
@@ -3035,6 +3152,19 @@ function renderMediaCards(containerId, videos) {
     const proxyCover = v.cover ? `/api/explore/proxy_image?url=${encodeURIComponent(v.cover)}` : '';
     const isSelected = exploreSelectedUrls.has(v.url);
 
+    // 女優名稱擷取與容錯處理
+    let actressName = v.actress || "";
+    if (!actressName && v.title) {
+      const cleanTitle = (v.id ? v.title.replace(new RegExp('^' + v.id + '\\\\s*', 'i'), '') : v.title).trim();
+      const parts = cleanTitle.split(/\\s+/);
+      if (parts.length >= 2) {
+        const last = parts[parts.length - 1].replace(/^[・·\\s\\-_/／\\(\\)（）\\[\\]【】]+|[・·\\s\\-_/／\\(\\)（）\\[\\]【】]+$/g, '');
+        if (/[\\u4e00-\\u9fff\\u3040-\\u30ff]/.test(last) && last.length >= 2 && last.length <= 15 && !/^[0-9]+$/.test(last) && !/中文字幕|無碼|流出|HD|4K|合集/.test(last)) {
+          actressName = last;
+        }
+      }
+    }
+
     card.innerHTML = `
       <div class="media-thumb-wrap">
         <img src="${proxyCover}" class="media-thumb" loading="lazy" onerror="this.src='/favicon.svg'">
@@ -3043,13 +3173,28 @@ function renderMediaCards(containerId, videos) {
         ${v.duration ? `<span class="media-duration">${escapeHtml(v.duration)}</span>` : ''}
       </div>
       <div class="media-card-body">
-        <div class="media-card-code">${escapeHtml(v.id || '')}</div>
+        <div class="media-card-code-row">
+          <span class="media-card-code">${escapeHtml(v.id || '')}</span>
+          ${actressName ? `<span class="media-card-actress" title="女優：${escapeHtml(actressName)} (點擊搜尋此女優作品)" onclick="event.stopPropagation(); searchActressQuick('${escapeHtml(actressName)}')">🌸 ${escapeHtml(actressName)}</span>` : ''}
+        </div>
         <div class="media-card-title" title="${escapeHtml(v.title)}">${escapeHtml(v.title)}</div>
         <button type="button" class="btn-quick-download" onclick="addSingleToQueue('${escapeHtml(v.url)}', this)">➕ 一鍵下載</button>
       </div>
     `;
     container.appendChild(card);
   }
+}
+
+function searchActressQuick(name) {
+  if (!name) return;
+  switchExploreTab('search');
+  const inp = document.getElementById("explore-search-input");
+  if (inp) {
+    inp.value = name;
+  }
+  const panel = document.getElementById("panel-search");
+  if (panel) panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  executeExploreSearch(true);
 }
 
 function onExploreChkChange(chk, url) {
