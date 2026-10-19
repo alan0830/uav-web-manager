@@ -30,21 +30,26 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # 2. 若有設定 Docker Hub 密鑰，登入 Docker Hub
+      # 2. 登入 Docker Hub (若有設定密鑰)
       - name: Log in to Docker Hub
-        if: "${{ secrets.DOCKERHUB_USERNAME != '' }}"
+        env:
+          DOCKERHUB_USER: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        if: env.DOCKERHUB_USER != ''
         uses: docker/login-action@v3
         with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          username: ${{ env.DOCKERHUB_USER }}
+          password: ${{ env.DOCKERHUB_TOKEN }}
 
       # 3. 組合要推送的 Tags
       - name: Determine Docker Image Tags
         id: tags
+        env:
+          DOCKERHUB_USER: ${{ secrets.DOCKERHUB_USERNAME }}
         run: |
           TAGS="ghcr.io/${{ github.repository }}:latest"
-          if [ -n "${{ secrets.DOCKERHUB_USERNAME }}" ]; then
-            TAGS="$TAGS,${{ secrets.DOCKERHUB_USERNAME }}/uav-web-manager:latest"
+          if [ -n "$DOCKERHUB_USER" ]; then
+            TAGS="$TAGS,$DOCKERHUB_USER/uav-web-manager:latest"
           fi
           echo "tags=$TAGS" >> $GITHUB_OUTPUT
 
