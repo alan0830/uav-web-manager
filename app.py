@@ -771,31 +771,31 @@ def search_jable_videos(query, page=1):
         return []
 
 def fetch_jable_actresses(page=1):
-    url = "https://jable.tv/models/"
+    url = "https://jable.tv/models/?sort_by=model_viewed"
     if page > 1:
-        url = f"{url}?from={page}"
+        url = f"https://jable.tv/models/{page}/?sort_by=model_viewed"
     try:
         r = robust_browser_get(url)
         if r.status_code != 200:
             return []
         soup = BeautifulSoup(r.text, "html.parser")
         actresses = []
-        for card in soup.select("div.col-6, div.col-md-3, div.col-xl-2"):
-            a = card.find("a", href=True)
+        for box in soup.select("div.horizontal-img-box"):
+            a = box.find("a", href=True)
             if not a or "/models/" not in a["href"]:
                 continue
-            img = card.find("img")
-            h4 = card.find(["h4", "h5", "h6"])
-            sub = card.find(["p", "span", "small"])
-            name = h4.text.strip() if h4 else a.text.strip()
+            img = box.find("img")
+            title_el = box.find(["h6", "h5", "h4"]) or a
+            sub_el = box.find("span")
+            name = title_el.text.strip() if title_el else a.text.strip()
             avatar = img.get("data-src") or img.get("src") if img else ""
-            video_count = sub.text.strip() if sub else ""
+            sub = sub_el.text.strip() if sub_el else ""
             if name and a["href"] != "https://jable.tv/models/":
                 actresses.append({
                     "name": name,
                     "url": a["href"],
                     "avatar": avatar,
-                    "video_count": video_count,
+                    "video_count": sub,
                     "source": "JableTV"
                 })
         return actresses
@@ -931,20 +931,35 @@ def fetch_missav_actresses(page=1):
             return []
         soup = BeautifulSoup(r.text, "html.parser")
         actresses = []
-        for a in soup.select("a"):
+        seen = set()
+        for a in soup.select("a[href*='/actresses/']"):
             href = a.get("href", "")
-            if "/actresses/" in href and not href.endswith("/ranking"):
-                img = a.find("img")
-                name = a.text.strip()
-                avatar = img.get("data-src") or img.get("src") if img else ""
-                if name:
-                    actresses.append({
-                        "name": name,
-                        "url": href,
-                        "avatar": avatar,
-                        "video_count": "",
-                        "source": "MissAV"
-                    })
+            if href.endswith("/ranking") or href in seen:
+                continue
+            parent = a.find_parent("div", class_=lambda c: c and ("flex" in c or "col" in c or "card" in c or "grid" in c)) or a.parent
+            img = parent.find("img")
+            text_links = [l for l in parent.find_all("a", href=True) if "/actresses/" in l["href"] and l.text.strip()]
+            if text_links:
+                full_text = text_links[0].text.strip()
+                lines = [line.strip() for line in full_text.splitlines() if line.strip()]
+                name = lines[0] if lines else ""
+                count = lines[1] if len(lines) > 1 else ""
+            elif img and img.get("alt"):
+                name = img.get("alt").strip()
+                count = ""
+            else:
+                name = ""
+                count = ""
+            avatar = img.get("data-src") or img.get("src") if img else ""
+            if name:
+                seen.add(href)
+                actresses.append({
+                    "name": name,
+                    "url": href,
+                    "avatar": avatar,
+                    "video_count": count,
+                    "source": "MissAV"
+                })
         return actresses
     except Exception as e:
         log_global(f"MissAV 女優清單抓取失敗: {e}")
@@ -985,6 +1000,122 @@ def fetch_missav_actress_videos(actress_url, page=1):
         return results
     except Exception as e:
         log_global(f"MissAV 女優影片抓取失敗 ({actress_url}): {e}")
+        return []
+
+def parse_supjav_posts(soup):
+    results = []
+    for p in soup.select("div.post"):
+        a = p.find("a", class_="img") or p.find("a", href=True)
+        if not a:
+            continue
+        href = a.get("href", "")
+        if not href or href == "https://supjav.com/":
+            continue
+        img = p.find("img")
+        title_el = p.find(["h3", "h2"]) or a
+        title = title_el.text.strip() if title_el else (a.get("title") or "")
+        cover = img.get("data-original") or img.get("data-src") or img.get("src") if img else ""
+        if cover.startswith("data:image"):
+            cover = img.get("data-original") or ""
+
+        m = re.search(r'([A-Za-z0-9]+(?:PPV)?[-_]\d+)', title)
+        code = m.group(1).upper() if m else ""
+        if not code:
+            parts = title.split()
+            if len(parts) >= 2 and parts[0].upper() == "FC2PPV":
+                code = f"FC2-PPV-{parts[1]}"
+            elif len(parts) >= 1:
+                code = parts[0]
+
+        results.append({
+            "id": code,
+            "title": title,
+            "url": href,
+            "cover": cover,
+            "duration": "",
+            "source": "SupJav"
+        })
+    return results
+
+def fetch_supjav_videos(cat="today-hot", page=1):
+    urls = {
+        "today-hot": "https://supjav.com/popular",
+        "weekly-hot": "https://supjav.com/popular",
+        "monthly-hot": "https://supjav.com/popular",
+        "latest": "https://supjav.com/",
+        "chinese": "https://supjav.com/category/chinese-subtitles",
+        "uncensored": "https://supjav.com/category/uncensored-jav",
+    }
+    base = urls.get(cat, "https://supjav.com/popular")
+    if page > 1:
+        if base.endswith("/"):
+            url = f"{base}page/{page}"
+        else:
+            url = f"{base}/page/{page}"
+    else:
+        url = base
+    try:
+        r = robust_browser_get(url, timeout=12)
+        if r.status_code != 200:
+            return []
+        soup = BeautifulSoup(r.text, "html.parser")
+        return parse_supjav_posts(soup)
+    except Exception as e:
+        log_global(f"SupJav 分類抓取失敗 ({cat}): {e}")
+        return []
+
+def search_supjav_videos(query, page=1):
+    q = urllib.parse.quote(query.strip())
+    if page > 1:
+        url = f"https://supjav.com/page/{page}/?s={q}"
+    else:
+        url = f"https://supjav.com/?s={q}"
+    try:
+        r = robust_browser_get(url, timeout=12)
+        if r.status_code != 200:
+            return []
+        soup = BeautifulSoup(r.text, "html.parser")
+        return parse_supjav_posts(soup)
+    except Exception as e:
+        log_global(f"SupJav 搜尋失敗 ({query}): {e}")
+        return []
+
+def fetch_supjav_actresses(page=1):
+    url = "https://supjav.com/cast"
+    try:
+        r = robust_browser_get(url, timeout=12)
+        if r.status_code != 200:
+            return []
+        soup = BeautifulSoup(r.text, "html.parser")
+        actresses = []
+        for a in soup.select("a[href*='/category/cast/']"):
+            name_raw = a.text.strip()
+            href = a.get("href", "")
+            if name_raw and href:
+                actresses.append({
+                    "name": name_raw,
+                    "url": href,
+                    "avatar": "",
+                    "video_count": "",
+                    "source": "SupJav"
+                })
+        return actresses[:50]
+    except Exception as e:
+        log_global(f"SupJav 女優清單抓取失敗: {e}")
+        return []
+
+def fetch_supjav_actress_videos(actress_url, page=1):
+    url = actress_url
+    if page > 1:
+        url = f"{url.rstrip('/')}/page/{page}"
+    try:
+        r = robust_browser_get(url, timeout=12)
+        if r.status_code != 200:
+            return []
+        soup = BeautifulSoup(r.text, "html.parser")
+        return parse_supjav_posts(soup)
+    except Exception as e:
+        log_global(f"SupJav 女優影片抓取失敗 ({actress_url}): {e}")
         return []
 
 
@@ -1693,6 +1824,17 @@ div.desktop-only { display: block; }
   border: 2px solid #e2e8f0;
   background: #edf2f7;
 }
+.actress-avatar-initial {
+  display: flex !important;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: #ffffff;
+  font-size: 26px;
+  font-weight: 700;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.3);
+  border: 2px solid #cbd5e0;
+}
 .actress-name {
   font-size: 13px;
   font-weight: bold;
@@ -1817,6 +1959,7 @@ div.desktop-only { display: block; }
     <div class="source-switcher">
       <button type="button" class="source-btn active" id="src-jable" onclick="setExploreSource('jable')">JableTV</button>
       <button type="button" class="source-btn" id="src-missav" onclick="setExploreSource('missav')">MissAV</button>
+      <button type="button" class="source-btn" id="src-supjav" onclick="setExploreSource('supjav')">SupJav</button>
     </div>
   </div>
 
@@ -2441,10 +2584,24 @@ function switchExploreTab(tab, btnEl) {
   }
 }
 
+function getSourceDisplayName(src) {
+  if (src === 'missav') return 'MissAV';
+  if (src === 'supjav') return 'SupJav';
+  return 'JableTV';
+}
+
+function getActressInitial(name) {
+  if (!name) return "🌸";
+  const clean = name.trim().replace(/^[^a-zA-Z0-9\u4e00-\u9fa5\u3040-\u30ff]+/, '');
+  return clean.charAt(0) || "🌸";
+}
+
 function setExploreSource(src) {
   exploreSource = src;
   document.getElementById("src-jable").classList.toggle("active", src === "jable");
   document.getElementById("src-missav").classList.toggle("active", src === "missav");
+  const sjBtn = document.getElementById("src-supjav");
+  if (sjBtn) sjBtn.classList.toggle("active", src === "supjav");
   
   if (exploreTab === "trending") {
     loadExploreTrending();
@@ -2465,7 +2622,8 @@ function setCategory(cat, btnEl) {
 
 async function loadExploreTrending() {
   const container = document.getElementById("trending-grid");
-  container.innerHTML = `<div style="grid-column: 1 / -1; text-align: center; color: #a0aec0; padding: 40px;">正在抓取 ${exploreSource === 'jable' ? 'JableTV' : 'MissAV'} 最新熱門影片...</div>`;
+  const sName = getSourceDisplayName(exploreSource);
+  container.innerHTML = `<div style="grid-column: 1 / -1; text-align: center; color: #a0aec0; padding: 40px;">正在抓取 ${sName} 最新熱門影片...</div>`;
   try {
     const res = await fetch(`/api/explore/videos?source=${exploreSource}&cat=${exploreCategory}`);
     const data = await res.json();
@@ -2477,7 +2635,8 @@ async function loadExploreTrending() {
 
 async function loadExploreActresses() {
   const container = document.getElementById("actress-grid");
-  container.innerHTML = `<div style="grid-column: 1 / -1; text-align: center; color: #a0aec0; padding: 40px;">正在加載 ${exploreSource === 'jable' ? 'JableTV' : 'MissAV'} 人氣女優榜...</div>`;
+  const sName = getSourceDisplayName(exploreSource);
+  container.innerHTML = `<div style="grid-column: 1 / -1; text-align: center; color: #a0aec0; padding: 40px;">正在加載 ${sName} 人氣女優榜...</div>`;
   document.getElementById("actress-breadcrumb").style.display = "none";
   document.getElementById("actress-grid").style.display = "grid";
   document.getElementById("actress-videos-grid").style.display = "none";
@@ -2495,10 +2654,13 @@ async function loadExploreActresses() {
       const card = document.createElement("div");
       card.className = "actress-card";
       const proxyAvatar = act.avatar ? `/api/explore/proxy_image?url=${encodeURIComponent(act.avatar)}` : '';
-      const avatarHtml = proxyAvatar ? `<img src="${proxyAvatar}" class="actress-avatar" loading="lazy">` : `<div class="actress-avatar" style="display:flex;align-items:center;justify-content:center;color:#a0aec0;font-size:18px;">👤</div>`;
+      const initial = getActressInitial(act.name);
+      const avatarHtml = proxyAvatar
+        ? `<img src="${proxyAvatar}" class="actress-avatar" loading="lazy" onerror="this.onerror=null; this.outerHTML='<div class=\\'actress-avatar actress-avatar-initial\\'>${escapeHtml(initial)}</div>';">`
+        : `<div class="actress-avatar actress-avatar-initial">${escapeHtml(initial)}</div>`;
       card.innerHTML = `
         ${avatarHtml}
-        <div class="actress-name">${escapeHtml(act.name)}</div>
+        <div class="actress-name" title="${escapeHtml(act.name)}">${escapeHtml(act.name)}</div>
         <div class="actress-count">${escapeHtml(act.video_count || '')}</div>
       `;
       card.onclick = () => exploreActressVideos(act.url, act.name);
@@ -3057,6 +3219,8 @@ def api_explore_videos():
     page = int(request.args.get("page", 1))
     if src == "missav":
         videos = fetch_missav_videos(cat, page)
+    elif src == "supjav":
+        videos = fetch_supjav_videos(cat, page)
     else:
         videos = fetch_jable_videos(cat, page)
     return jsonify({"ok": True, "videos": videos, "source": src, "cat": cat, "page": page})
@@ -3071,6 +3235,8 @@ def api_explore_search():
         return jsonify({"ok": True, "videos": []})
     if src == "missav":
         videos = search_missav_videos(query, page)
+    elif src == "supjav":
+        videos = search_supjav_videos(query, page)
     else:
         videos = search_jable_videos(query, page)
     return jsonify({"ok": True, "videos": videos, "query": query, "source": src, "page": page})
@@ -3082,6 +3248,8 @@ def api_explore_actresses():
     page = int(request.args.get("page", 1))
     if src == "missav":
         actresses = fetch_missav_actresses(page)
+    elif src == "supjav":
+        actresses = fetch_supjav_actresses(page)
     else:
         actresses = fetch_jable_actresses(page)
     return jsonify({"ok": True, "actresses": actresses, "source": src, "page": page})
@@ -3096,6 +3264,8 @@ def api_explore_actress_videos():
         return jsonify({"ok": True, "videos": []})
     if src == "missav" or "missav" in actress_url:
         videos = fetch_missav_actress_videos(actress_url, page)
+    elif src == "supjav" or "supjav" in actress_url:
+        videos = fetch_supjav_actress_videos(actress_url, page)
     else:
         videos = fetch_jable_actress_videos(actress_url, page)
     return jsonify({"ok": True, "videos": videos, "url": actress_url, "page": page})
@@ -3105,9 +3275,16 @@ def api_explore_proxy_image():
     img_url = request.args.get("url", "")
     if not img_url:
         return Response("", status=404)
-    referer = "https://jable.tv/" if "jable" in img_url else "https://missav.ai/"
+    if "jable" in img_url:
+        referer = "https://jable.tv/"
+    elif "supjav" in img_url:
+        referer = "https://supjav.com/"
+    elif "fourhoi" in img_url or "missav" in img_url:
+        referer = "https://missav.ai/"
+    else:
+        referer = "https://missav.ai/"
     try:
-        r = robust_browser_get(img_url, referer=referer, timeout=8)
+        r = robust_browser_get(img_url, referer=referer, timeout=10)
         if r.status_code == 200:
             c_type = r.headers.get("Content-Type", "image/jpeg")
             resp = Response(r.content, mimetype=c_type)
