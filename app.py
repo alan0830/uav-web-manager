@@ -732,8 +732,9 @@ MAIN_PAGE_HTML = """
 <meta charset="utf-8">
 <title>UAV 下載 ＆ 刮削整理中心</title>
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
 <style>
+* { box-sizing: border-box; }
 body {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
   background: #f4f6f9; margin: 20px; color: #2d3748;
@@ -741,7 +742,7 @@ body {
 .header-bar {
   display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px;
 }
-h1 { margin: 0; font-size: 24px; color: #1a202c; }
+h1 { margin: 0; font-size: 22px; color: #1a202c; }
 .card {
   background: white; padding: 18px; margin-bottom: 18px; border-radius: 12px;
   box-shadow: 0 2px 8px rgba(0,0,0,0.06);
@@ -756,7 +757,9 @@ input[type="text"] {
 }
 button {
   padding: 8px 14px; font-size: 14px; border-radius: 6px; cursor: pointer; border: 0;
+  transition: background 0.2s, transform 0.1s;
 }
+button:active { transform: scale(0.98); }
 .btn-primary { background: #2b6cb0; color: white; }
 .btn-primary:hover { background: #2c5282; }
 .btn-success { background: #2f855a; color: white; }
@@ -775,11 +778,22 @@ th { background: #f7fafc; color: #4a5568; font-size: 13px; }
 .done { color: #38a169; font-weight: bold; }
 .failed { color: #e53e3e; font-weight: bold; }
 
+.status-badge {
+  display: inline-block; padding: 3px 8px; border-radius: 4px; font-size: 12px; font-weight: bold;
+}
+.status-badge.running { background: #ebf8ff; color: #2b6cb0; }
+.status-badge.done { background: #f0fff4; color: #276749; }
+.status-badge.failed { background: #fff5f5; color: #c53030; }
+.status-badge.waiting { background: #edf2f7; color: #4a5568; }
+
+.progress-box { display: flex; align-items: center; gap: 8px; }
 .progress-wrap {
   width: 120px; height: 10px; background: #e2e8f0; border-radius: 5px;
   overflow: hidden; display: inline-block; vertical-align: middle;
 }
 .progress-bar { height: 10px; width: 0%; background: #3182ce; transition: width 0.3s; }
+.progress-num { font-size: 12px; font-weight: bold; color: #4a5568; min-width: 36px; }
+
 .item-log {
   display: none; background: #1a202c; color: #edf2f7; padding: 10px;
   border-radius: 6px; max-height: 280px; overflow: auto; font-family: monospace; font-size: 12px;
@@ -793,11 +807,11 @@ th { background: #f7fafc; color: #4a5568; font-size: 13px; }
   background: #feebc8; color: #c05621; font-size: 11px; margin-left: 4px;
 }
 .poster-thumb {
-  width: 52px; height: 76px; object-fit: cover; border-radius: 4px;
+  width: 56px; height: 80px; object-fit: cover; border-radius: 4px;
   border: 1px solid #e2e8f0; background: #f7fafc; display: block;
 }
-.path-info { font-size: 13px; color: #718096; margin-top: 4px; }
-.path-info code { background: #edf2f7; padding: 2px 6px; border-radius: 4px; color: #2d3748; }
+.path-info { font-size: 13px; color: #718096; margin-top: 4px; word-break: break-all; }
+.path-info code { background: #edf2f7; padding: 2px 6px; border-radius: 4px; color: #2d3748; word-break: break-all; }
 .flex-between { display: flex; justify-content: space-between; align-items: center; }
 .action-gap { display: flex; gap: 8px; flex-wrap: wrap; }
 
@@ -805,21 +819,277 @@ th { background: #f7fafc; color: #4a5568; font-size: 13px; }
   background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px;
   padding: 14px; margin-bottom: 14px;
 }
-.preset-links { display: flex; gap: 6px; align-items: center; margin-bottom: 8px; }
+.preset-links { display: flex; gap: 6px; align-items: center; margin-bottom: 8px; flex-wrap: wrap; }
 .btn-preset {
-  background: #edf2f7; border: 1px solid #cbd5e0; padding: 2px 8px;
+  background: #edf2f7; border: 1px solid #cbd5e0; padding: 3px 8px;
   font-size: 12px; border-radius: 4px; cursor: pointer; color: #2d3748;
 }
 .btn-preset:hover { background: #e2e8f0; color: #1a202c; }
 .var-picker { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; align-items: center; }
 .var-tag {
-  background: #e2e8f0; border: 0; padding: 2px 8px; font-size: 11px;
+  background: #e2e8f0; border: 0; padding: 3px 8px; font-size: 11px;
   border-radius: 4px; cursor: pointer; color: #4a5568; font-weight: 500;
 }
 .var-tag:hover { background: #cbd5e0; color: #1a202c; }
 .rule-preview {
   margin-top: 8px; font-size: 12px; color: #2b6cb0; background: #ebf8ff;
   padding: 6px 10px; border-radius: 6px; word-break: break-all;
+}
+
+.table-responsive { width: 100%; }
+.mobile-only { display: none !important; }
+.desktop-only { display: table-cell; }
+tr.desktop-only { display: table-row; }
+div.desktop-only { display: block; }
+
+/* 行動端 RWD 排版設計 (螢幕小於等於 768px) */
+@media (max-width: 768px) {
+  body { margin: 10px; }
+  .header-bar {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+    margin-bottom: 12px;
+  }
+  .header-bar div {
+    display: flex;
+    justify-content: space-between;
+    width: 100%;
+    font-size: 14px;
+  }
+  h1 { font-size: 19px; }
+  .card { padding: 14px; margin-bottom: 14px; border-radius: 10px; }
+
+  .mobile-only { display: flex !important; }
+  td.mobile-only { display: block !important; }
+  .desktop-only { display: none !important; }
+  tr.desktop-only { display: none !important; }
+  td.desktop-only { display: none !important; }
+  div.desktop-only { display: none !important; }
+
+  /* 卡片頭部自適應排版 */
+  .card-header-responsive {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+    margin-bottom: 12px;
+  }
+  .card-header-responsive h2 {
+    font-size: 16px;
+    margin: 0;
+  }
+
+  /* 待整理影片庫頂部 4 個操作按鈕轉為 2x2 網格，整齊好按 */
+  .unscraped-top-actions {
+    display: grid !important;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    width: 100%;
+  }
+  .unscraped-top-actions button {
+    padding: 10px 6px;
+    font-size: 13px;
+    text-align: center;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  /* 清空佇列按鈕與送出任務按鈕全寬化 */
+  .queue-clear-btn, .btn-submit-task {
+    width: 100%;
+    padding: 10px;
+    font-size: 14px;
+    text-align: center;
+  }
+
+  /* 規則設定內部排版 */
+  .rule-header-responsive {
+    flex-direction: column;
+    align-items: flex-start !important;
+    gap: 6px;
+  }
+
+  /* ================= 手機端下載佇列卡片化 ================= */
+  #queue-table thead { display: none; }
+  #queue-table tbody tr.queue-row {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    padding: 12px;
+    margin-bottom: 10px;
+  }
+  #queue-table tbody tr.queue-row > td {
+    display: block;
+    padding: 0;
+    border: none;
+  }
+  #queue-table tbody tr.queue-log-row {
+    display: block;
+    margin-top: -6px;
+    margin-bottom: 10px;
+  }
+  #queue-table tbody tr.queue-log-row > td {
+    display: block;
+    padding: 0;
+    border: none;
+  }
+
+  .q-mobile-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    width: 100%;
+  }
+  .q-mobile-time {
+    font-size: 12px;
+    color: #718096;
+  }
+  .q-mobile-actions {
+    display: flex;
+    gap: 6px;
+  }
+  .q-mobile-actions button {
+    padding: 4px 10px;
+    font-size: 12px;
+  }
+
+  .queue-row .progress-box {
+    width: 100%;
+  }
+  .queue-row .progress-wrap {
+    flex: 1;
+    height: 12px;
+  }
+  .queue-row .progress-bar {
+    height: 12px;
+  }
+
+  .q-msg-box {
+    font-size: 13px;
+    font-weight: 500;
+    color: #2d3748;
+    line-height: 1.4;
+  }
+
+  .q-url-box {
+    font-size: 12px;
+    color: #4a5568;
+    background: #edf2f7;
+    padding: 6px 8px;
+    border-radius: 4px;
+    word-break: break-all;
+    font-family: monospace;
+  }
+
+  /* ================= 手機端待整理影片庫卡片化 ================= */
+  #unscraped-table thead { display: none; }
+  #unscraped-table tbody tr.unscraped-row {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    background: #ffffff;
+    border: 1px solid #e2e8f0;
+    border-radius: 10px;
+    padding: 12px;
+    margin-bottom: 12px;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.05);
+  }
+  #unscraped-table tbody tr.unscraped-row > td {
+    display: block;
+    padding: 0;
+    border: none;
+  }
+
+  /* 手機專屬快速全選列 */
+  .mobile-select-bar {
+    display: flex !important;
+    justify-content: space-between;
+    align-items: center;
+    background: #edf2f7;
+    padding: 8px 12px;
+    border-radius: 6px;
+    margin-bottom: 10px;
+    font-size: 13px;
+  }
+
+  /* 影片卡片頂部：勾選 + 番號 + 狀態 + 大小 */
+  .u-card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding-bottom: 6px;
+    border-bottom: 1px dashed #e2e8f0;
+  }
+  .u-card-header-left {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .u-card-header-left input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+  }
+
+  /* 影片卡片主體：海報 + 內容 */
+  .u-card-body {
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+  }
+  .u-card-poster {
+    flex-shrink: 0;
+  }
+  .u-card-poster .poster-thumb {
+    width: 65px;
+    height: 92px;
+    border-radius: 6px;
+  }
+  .u-card-details {
+    flex: 1;
+    min-width: 0;
+  }
+  .u-card-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: #2b6cb0;
+    line-height: 1.4;
+    word-break: break-word;
+  }
+  .u-card-meta {
+    font-size: 12px;
+    color: #718096;
+    margin-top: 4px;
+    line-height: 1.3;
+  }
+  .u-card-target {
+    font-size: 11px;
+    color: #2f855a;
+    margin-top: 4px;
+    word-break: break-all;
+    background: #f0fff4;
+    padding: 3px 6px;
+    border-radius: 4px;
+  }
+
+  /* 影片卡片底部按鈕均分全寬 */
+  .u-card-ops {
+    display: grid !important;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    width: 100%;
+    margin-top: 2px;
+  }
+  .u-card-ops button {
+    padding: 8px 6px;
+    font-size: 13px;
+    text-align: center;
+  }
 }
 </style>
 </head>
@@ -843,7 +1113,7 @@ th { background: #f7fafc; color: #4a5568; font-size: 13px; }
   <div id="rule-section" style="display: none; margin-top: 14px;">
     <!-- 單女優規則 -->
     <div class="rule-box">
-      <div class="flex-between">
+      <div class="flex-between rule-header-responsive">
         <strong>單女優命名規則</strong>
         <div class="preset-links">
           <span style="font-size:12px;color:#718096;">推薦範本：</span>
@@ -870,7 +1140,7 @@ th { background: #f7fafc; color: #4a5568; font-size: 13px; }
 
     <!-- 多女優規則 -->
     <div class="rule-box">
-      <div class="flex-between">
+      <div class="flex-between rule-header-responsive">
         <strong>多女優命名規則 (出演大於 1 位時套用)</strong>
         <div class="preset-links">
           <span style="font-size:12px;color:#718096;">推薦範本：</span>
@@ -895,7 +1165,7 @@ th { background: #f7fafc; color: #4a5568; font-size: 13px; }
     </div>
 
     <div style="text-align: right;">
-      <button class="btn-primary" onclick="saveSettingsToServer()">💾 儲存命名設定</button>
+      <button class="btn-primary btn-submit-task" onclick="saveSettingsToServer()">💾 儲存命名設定</button>
     </div>
   </div>
 </div>
@@ -907,40 +1177,44 @@ th { background: #f7fafc; color: #4a5568; font-size: 13px; }
   <form method="post" action="/add" style="margin-top: 10px;">
     <textarea name="urls" placeholder="貼上 Jable / MissAV 網址，一行一個..." required></textarea>
     <div style="margin-top: 10px;">
-      <button type="submit" class="btn-primary">加入下載佇列</button>
+      <button type="submit" class="btn-primary btn-submit-task">加入下載佇列</button>
     </div>
   </form>
 </div>
 
 <!-- 下載狀態管理 -->
 <div class="card">
-  <div class="flex-between" style="margin-bottom: 10px;">
+  <div class="card-header-responsive">
     <h2 style="margin: 0;">下載佇列進度</h2>
-    <button class="btn-secondary" onclick="clearFinishedQueue()">🗑️ 一鍵清空已完成與失敗項目</button>
+    <div>
+      <button class="btn-secondary queue-clear-btn" onclick="clearFinishedQueue()">🗑️ 一鍵清空已完成與失敗項目</button>
+    </div>
   </div>
-  <table>
-    <thead>
-      <tr>
-        <th>狀態</th>
-        <th>進度</th>
-        <th>網址</th>
-        <th>訊息</th>
-        <th>開始時間</th>
-        <th>操作</th>
-      </tr>
-    </thead>
-    <tbody id="queue"></tbody>
-  </table>
+  <div class="table-responsive">
+    <table id="queue-table">
+      <thead>
+        <tr>
+          <th>狀態</th>
+          <th>進度</th>
+          <th>網址</th>
+          <th>訊息</th>
+          <th>開始時間</th>
+          <th>操作</th>
+        </tr>
+      </thead>
+      <tbody id="queue"></tbody>
+    </table>
+  </div>
 </div>
 
 <!-- 手動刮削與入庫管理 -->
 <div class="card">
-  <div class="flex-between" style="margin-bottom: 12px;">
+  <div class="card-header-responsive">
     <div>
       <h2 style="margin: 0;">待整理影片庫 (支援子資料夾掃描 ＆ 自訂命名規則)</h2>
       <div class="path-info">整理庫基底：<code>{{ host_media_dir }}/</code></div>
     </div>
-    <div class="action-gap">
+    <div class="action-gap unscraped-top-actions">
       <button class="btn-secondary" onclick="refreshUnscraped()">🔄 重新掃描資料夾</button>
       <button class="btn-primary" onclick="scrapeAllPreview()">🔍 全部刮削預覽</button>
       <button class="btn-success" onclick="commitSelected()">📦 勾選批次入庫</button>
@@ -948,22 +1222,33 @@ th { background: #f7fafc; color: #4a5568; font-size: 13px; }
     </div>
   </div>
 
-  <table>
-    <thead>
-      <tr>
-        <th style="width: 30px;"><input type="checkbox" id="select-all" onclick="toggleSelectAll(this)"></th>
-        <th style="width: 60px;">海報</th>
-        <th>來源影片</th>
-        <th>識別番號</th>
-        <th>刮削預覽 ＆ 預計入庫路徑</th>
-        <th>狀態</th>
-        <th>操作</th>
-      </tr>
-    </thead>
-    <tbody id="unscraped-list">
-      <tr><td colspan="7" style="color:#718096;text-align:center;padding:20px;">載入中...</td></tr>
-    </tbody>
-  </table>
+  <!-- 手機專屬快速全選工具列 -->
+  <div class="mobile-select-bar mobile-only">
+    <label style="display:flex;align-items:center;gap:6px;cursor:pointer;user-select:none;">
+      <input type="checkbox" id="select-all-mobile" onclick="toggleSelectAll(this)">
+      <strong>全選所有影片</strong>
+    </label>
+    <span id="select-summary-mobile" style="color:#718096;font-size:12px;"></span>
+  </div>
+
+  <div class="table-responsive">
+    <table id="unscraped-table">
+      <thead>
+        <tr>
+          <th style="width: 30px;"><input type="checkbox" id="select-all" onclick="toggleSelectAll(this)"></th>
+          <th style="width: 60px;">海報</th>
+          <th>來源影片</th>
+          <th>識別番號</th>
+          <th>刮削預覽 ＆ 預計入庫路徑</th>
+          <th>狀態</th>
+          <th>操作</th>
+        </tr>
+      </thead>
+      <tbody id="unscraped-list">
+        <tr><td colspan="7" style="color:#718096;text-align:center;padding:20px;">載入中...</td></tr>
+      </tbody>
+    </table>
+  </div>
 </div>
 
 <script>
@@ -1100,16 +1385,48 @@ async function refreshQueue() {
     const isRunning = item.status === "running";
 
     const tr = document.createElement("tr");
+    tr.className = "queue-row";
     tr.innerHTML = `
-      <td><span class="${escapeHtml(item.status)}">${escapeHtml(item.status)}</span></td>
-      <td>
-        <span class="progress-wrap"><span class="progress-bar" style="width: ${progress}%;"></span></span>
-        <span style="font-size:12px;margin-left:4px;">${progress}%</span>
+      <!-- 手機端專用頂部標頭 (狀態、時間、操作) -->
+      <td class="mobile-only" style="width:100%;">
+        <div class="q-mobile-header">
+          <div>
+            <span class="status-badge ${escapeHtml(item.status)}">${escapeHtml(item.status)}</span>
+            <span class="q-mobile-time" style="margin-left:6px;">${escapeHtml(item.started_at)}</span>
+          </div>
+          <div class="q-mobile-actions">
+            <button class="btn-secondary" onclick="toggleLog('${safeId}')">${isOpen ? '收合' : 'Log'}</button>
+            <button class="btn-danger" ${isRunning ? 'disabled' : ''} onclick="deleteQueueItem('${safeId}')">刪除</button>
+          </div>
+        </div>
       </td>
-      <td style="max-width:300px;word-break:break-all;">${escapeHtml(item.url)}</td>
-      <td>${escapeHtml(item.message)}</td>
-      <td>${escapeHtml(item.started_at)}</td>
+
+      <!-- 桌機端狀態欄 -->
+      <td class="desktop-only"><span class="status-badge ${escapeHtml(item.status)}">${escapeHtml(item.status)}</span></td>
+
+      <!-- 進度欄位 (桌機與手機共用，手機自動延展) -->
       <td>
+        <div class="progress-box">
+          <span class="progress-wrap"><span class="progress-bar" style="width: ${progress}%;"></span></span>
+          <span class="progress-num">${progress}%</span>
+        </div>
+      </td>
+
+      <!-- 訊息 (手機端排在進度下方) -->
+      <td class="mobile-only" style="width:100%;">
+        <div class="q-msg-box">${escapeHtml(item.message)}</div>
+      </td>
+
+      <!-- 網址 (桌機端正常欄位 / 手機端以整行色塊展開，絕不擠壓) -->
+      <td class="desktop-only" style="max-width:300px;word-break:break-all;">${escapeHtml(item.url)}</td>
+      <td class="mobile-only" style="width:100%;">
+        <div class="q-url-box">🔗 ${escapeHtml(item.url)}</div>
+      </td>
+
+      <!-- 桌機端訊息、開始時間、操作欄位 -->
+      <td class="desktop-only">${escapeHtml(item.message)}</td>
+      <td class="desktop-only">${escapeHtml(item.started_at)}</td>
+      <td class="desktop-only">
         <button class="btn-secondary" style="padding:4px 8px;" onclick="toggleLog('${safeId}')">${isOpen ? '收合' : 'Log'}</button>
         <button class="btn-danger" style="padding:4px 8px;margin-left:4px;" ${isRunning ? 'disabled' : ''} onclick="deleteQueueItem('${safeId}')">刪除</button>
       </td>
@@ -1117,9 +1434,10 @@ async function refreshQueue() {
     tbody.appendChild(tr);
 
     const logTr = document.createElement("tr");
+    logTr.className = "queue-log-row";
     logTr.innerHTML = `
-      <td colspan="6">
-        <pre class="item-log" id="log-${safeId}" style="display:${isOpen ? 'block' : 'none'};">${escapeHtml(logs)}</pre>
+      <td colspan="6" style="padding:0;">
+        <pre class="item-log" id="log-${safeId}" style="display:${isOpen ? 'block' : 'none'};margin-top:4px;">${escapeHtml(logs)}</pre>
       </td>
     `;
     tbody.appendChild(logTr);
@@ -1147,6 +1465,7 @@ async function refreshUnscraped() {
 
   if (!data.files || data.files.length === 0) {
     tbody.innerHTML = `<tr><td colspan="7" style="color:#718096;text-align:center;padding:24px;">🎉 目前沒有等待整理的影片檔案</td></tr>`;
+    syncSelectSummary();
     return;
   }
 
@@ -1172,34 +1491,110 @@ async function refreshUnscraped() {
     }
 
     const tr = document.createElement("tr");
+    tr.className = "unscraped-row";
     tr.innerHTML = `
-      <td><input type="checkbox" class="file-chk" value="${escapeHtml(f.rel_path)}" ${isReady ? 'checked' : ''}></td>
-      <td>${posterImg}</td>
-      <td><strong>${escapeHtml(f.rel_path)}</strong><br><span style="font-size:12px;color:#718096;">${f.size_mb} MB</span></td>
-      <td><span class="badge">${escapeHtml(f.movie_id)}</span></td>
-      <td>${infoHtml}</td>
-      <td>
+      <!-- 手機端專屬精美卡片佈局 -->
+      <td class="mobile-only" style="width:100%;">
+        <!-- 頂部列：核取方塊 + 番號 + 狀態 + 大小 -->
+        <div class="u-card-header">
+          <div class="u-card-header-left">
+            <input type="checkbox" class="file-chk" value="${escapeHtml(f.rel_path)}" ${isReady ? 'checked' : ''} onchange="onCheckboxChange(this, '${escapeHtml(f.rel_path)}')">
+            <span class="badge">${escapeHtml(f.movie_id)}</span>
+          </div>
+          <div>
+            <span style="font-size:12px;color:#718096;margin-right:6px;">${f.size_mb} MB</span>
+            <span class="${isReady ? 'done' : 'waiting'}">${isReady ? '✅ 預覽完成' : '⏳ 待刮削'}</span>
+          </div>
+        </div>
+
+        <!-- 卡片主體：海報 + 刮削詳細資訊 -->
+        <div class="u-card-body" style="margin-top:8px;">
+          <div class="u-card-poster">
+            ${posterImg}
+          </div>
+          <div class="u-card-details">
+            ${isReady && f.meta ? `
+              <div class="u-card-title">
+                ${escapeHtml(f.meta.title)}
+                <span class="source-tag">${escapeHtml(f.meta.source || 'JavBus')}</span>
+              </div>
+              <div class="u-card-meta">
+                ${f.meta.original_title ? `<div>原名：${escapeHtml(f.meta.original_title)}</div>` : ''}
+                <div>女優：<strong style="color:#2d3748;">${escapeHtml(f.meta.actors.join(', ') || '素人')}</strong></div>
+                <div>日期：${escapeHtml(f.meta.release_date || '-')}</div>
+              </div>
+              <div class="u-card-target">
+                <strong>目標：</strong>${escapeHtml(HOST_MEDIA_DIR + '/' + f.target_rel)}
+              </div>
+            ` : `
+              <div class="u-card-title" style="color:#4a5568;">${escapeHtml(f.rel_path)}</div>
+              <div class="u-card-meta" style="color:#a0aec0;margin-top:4px;">
+                尚未刮削，點擊下方「刮削預覽」抓取資料
+              </div>
+            `}
+          </div>
+        </div>
+
+        <!-- 底部按鈕：雙按鈕均分 50% 寬度，極易觸控 -->
+        <div class="u-card-ops" style="margin-top:10px;">
+          <button class="btn-primary" onclick="previewSingle(this, '${escapeHtml(f.rel_path)}')">🔍 刮削預覽</button>
+          <button class="btn-success" ${!isReady ? 'disabled' : ''} onclick="commitSingle('${escapeHtml(f.rel_path)}')">📦 確認入庫</button>
+        </div>
+      </td>
+
+      <!-- 桌機端 7 欄標準表格 -->
+      <td class="desktop-only"><input type="checkbox" class="file-chk" value="${escapeHtml(f.rel_path)}" ${isReady ? 'checked' : ''} onchange="onCheckboxChange(this, '${escapeHtml(f.rel_path)}')"></td>
+      <td class="desktop-only">${posterImg}</td>
+      <td class="desktop-only"><strong>${escapeHtml(f.rel_path)}</strong><br><span style="font-size:12px;color:#718096;">${f.size_mb} MB</span></td>
+      <td class="desktop-only"><span class="badge">${escapeHtml(f.movie_id)}</span></td>
+      <td class="desktop-only">${infoHtml}</td>
+      <td class="desktop-only">
         <span class="${isReady ? 'done' : 'waiting'}">${isReady ? '✅ 預覽完成' : '⏳ 待刮削'}</span>
       </td>
-      <td>
+      <td class="desktop-only">
         <div class="action-gap">
-          <button class="btn-primary" style="padding:6px 10px;" onclick="previewSingle('${escapeHtml(f.rel_path)}')">🔍 刮削預覽</button>
+          <button class="btn-primary" style="padding:6px 10px;" onclick="previewSingle(this, '${escapeHtml(f.rel_path)}')">🔍 刮削預覽</button>
           <button class="btn-success" style="padding:6px 10px;" ${!isReady ? 'disabled' : ''} onclick="commitSingle('${escapeHtml(f.rel_path)}')">📦 確認入庫</button>
         </div>
       </td>
     `;
     tbody.appendChild(tr);
   }
+  syncSelectSummary();
+}
+
+function onCheckboxChange(el, path) {
+  document.querySelectorAll(`.file-chk[value="${CSS.escape(path)}"]`).forEach(c => c.checked = el.checked);
+  syncSelectSummary();
 }
 
 function toggleSelectAll(master) {
-  document.querySelectorAll(".file-chk").forEach(c => c.checked = master.checked);
+  const isChecked = master.checked;
+  document.querySelectorAll(".file-chk").forEach(c => c.checked = isChecked);
+  const m1 = document.getElementById("select-all");
+  const m2 = document.getElementById("select-all-mobile");
+  if (m1) m1.checked = isChecked;
+  if (m2) m2.checked = isChecked;
+  syncSelectSummary();
 }
 
-async function previewSingle(rel_path) {
-  const btn = event.target;
-  btn.disabled = true;
-  btn.innerText = "刮削中...";
+function syncSelectSummary() {
+  const allChecked = Array.from(document.querySelectorAll(".file-chk:checked")).map(c => c.value);
+  const uniqueCount = new Set(allChecked).size;
+  const allValues = Array.from(document.querySelectorAll(".file-chk")).map(c => c.value);
+  const totalCount = new Set(allValues).size;
+  const el = document.getElementById("select-summary-mobile");
+  if (el) {
+    el.innerText = totalCount > 0 ? `已選 ${uniqueCount} / ${totalCount} 部` : "";
+  }
+}
+
+async function previewSingle(btnEl, rel_path) {
+  const btn = btnEl || (window.event ? window.event.target : null);
+  if (btn) {
+    btn.disabled = true;
+    btn.innerText = "刮削中...";
+  }
   try {
     const res = await fetch("/api/scrape_preview", {
       method: "POST",
@@ -1235,7 +1630,7 @@ async function commitSingle(rel_path) {
 }
 
 async function commitSelected() {
-  const selected = Array.from(document.querySelectorAll(".file-chk:checked")).map(c => c.value);
+  const selected = Array.from(new Set(Array.from(document.querySelectorAll(".file-chk:checked")).map(c => c.value)));
   if (selected.length === 0) {
     alert("請先勾選要入庫的項目！");
     return;
@@ -1252,7 +1647,7 @@ async function commitSelected() {
 }
 
 async function commitAll() {
-  const allFiles = Array.from(document.querySelectorAll(".file-chk")).map(c => c.value);
+  const allFiles = Array.from(new Set(Array.from(document.querySelectorAll(".file-chk")).map(c => c.value)));
   if (allFiles.length === 0) {
     alert("目前沒有可入庫的項目！");
     return;
