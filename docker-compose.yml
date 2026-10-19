@@ -2,7 +2,8 @@ version: '3.8'
 
 services:
   uav-web:
-    image: ghcr.io/alos21750/uav-downloader:latest
+    # 官方全封裝映像檔（自動包含 Web 管理、影音探索、女優庫與 Cloudflare 繞過引擎）
+    image: alantsai0830/uav-web-manager:latest
     container_name: uav-web-downloader
     restart: unless-stopped
     ports:
@@ -12,8 +13,8 @@ services:
       - /volume1/xVideo/new:/downloads
       # 刮削整理後的正式媒體庫目錄
       - /volume1/xVideo/JAVDB_DATA:/media_library
-      # 網頁程式掛載
-      - ./app.py:/app/app.py
+      # 系統配置與帳號持久化目錄
+      - ./config:/app/config
     environment:
       - DOWNLOAD_DIR=/downloads
       - MEDIA_LIBRARY_DIR=/media_library
@@ -22,5 +23,3 @@ services:
       - HOST_MEDIA_DIR=/volume1/xVideo/JAVDB_DATA
       - RESOLUTION=highest
       - TZ=Asia/Taipei
-    # 容器啟動時自動安裝刮削、圖片處理、Cloudflare 繞過與 Web 依賴
-    entrypoint: ["sh", "-c", "pip install --no-cache-dir flask beautifulsoup4 pillow requests curl_cffi && python -u /app/app.py"]
