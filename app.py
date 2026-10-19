@@ -7,6 +7,7 @@ import shutil
 import base64
 import threading
 import subprocess
+import urllib.parse
 from functools import wraps
 from datetime import datetime
 from PIL import Image
@@ -16,6 +17,13 @@ from werkzeug.security import generate_password_hash, check_password_hash
 from flask import (
     Flask, request, redirect, jsonify, render_template_string, Response, session, url_for
 )
+
+try:
+    from curl_cffi import requests as cffi_requests
+    HAS_CURL_CFFI = True
+except ImportError:
+    import requests as cffi_requests
+    HAS_CURL_CFFI = False
 
 # 容器內部目錄配置
 DOWNLOAD_DIR = os.getenv("DOWNLOAD_DIR", "/downloads")
@@ -645,6 +653,341 @@ def generate_nfo_xml(meta):
     return "\n".join(xml)
 
 
+# ==================== 線上影音探索與搜尋爬蟲模組 ====================
+
+_BROWSER_SESSION = None
+_BROWSER_LOCK = threading.Lock()
+
+def get_browser_session():
+    global _BROWSER_SESSION
+    with _BROWSER_LOCK:
+        if _BROWSER_SESSION is None:
+            if HAS_CURL_CFFI and hasattr(cffi_requests, "Session"):
+                try:
+                    _BROWSER_SESSION = cffi_requests.Session(impersonate="chrome120")
+                except Exception:
+                    _BROWSER_SESSION = cffi_requests.Session()
+            else:
+                _BROWSER_SESSION = cffi_requests.Session()
+            _BROWSER_SESSION.headers.update({
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
+                "Accept-Language": "zh-TW,zh;q=0.9,en-US;q=0.8,en;q=0.7"
+            })
+        return _BROWSER_SESSION
+
+def robust_browser_get(url, referer=None, timeout=12):
+    s = get_browser_session()
+    headers = {}
+    if referer:
+        headers["Referer"] = referer
+    try:
+        return s.get(url, headers=headers, timeout=timeout)
+    except Exception as e:
+        log_global(f"連線請求異常重試中 ({url}): {e}")
+        global _BROWSER_SESSION
+        with _BROWSER_LOCK:
+            _BROWSER_SESSION = None
+        s = get_browser_session()
+        return s.get(url, headers=headers, timeout=timeout)
+
+def fetch_jable_videos(cat="today-hot", page=1):
+    urls = {
+        "today-hot": "https://jable.tv/hot/",
+        "weekly-hot": "https://jable.tv/hot/?sort_by=video_viewed_week",
+        "monthly-hot": "https://jable.tv/hot/?sort_by=video_viewed_month",
+        "latest": "https://jable.tv/latest-updates/",
+        "chinese": "https://jable.tv/categories/chinese-subtitle/",
+        "uncensored": "https://jable.tv/categories/uncensored/",
+    }
+    url = urls.get(cat, "https://jable.tv/hot/")
+    if page > 1:
+        sep = "&" if "?" in url else "?"
+        url = f"{url}{sep}from={page}"
+    try:
+        r = robust_browser_get(url)
+        if r.status_code != 200:
+            return []
+        soup = BeautifulSoup(r.text, "html.parser")
+        results = []
+        for box in soup.select("div.video-img-box"):
+            a = box.find("a", href=True)
+            img = box.find("img")
+            title_el = box.find_next("h6") or box.find("h6")
+            dur_el = box.find("span", class_="label")
+            if not a:
+                continue
+            v_url = a["href"]
+            cover = img.get("data-src") or img.get("src") if img else ""
+            title = title_el.text.strip() if title_el else ""
+            dur = dur_el.text.strip() if dur_el else ""
+            mid = v_url.rstrip("/").split("/")[-1].upper()
+            results.append({
+                "id": mid,
+                "title": title,
+                "url": v_url,
+                "cover": cover,
+                "duration": dur,
+                "source": "JableTV"
+            })
+        return results
+    except Exception as e:
+        log_global(f"Jable 分類抓取失敗 ({cat}): {e}")
+        return []
+
+def search_jable_videos(query, page=1):
+    q = urllib.parse.quote(query.strip())
+    url = f"https://jable.tv/search/{q}/"
+    if page > 1:
+        url = f"{url}?from={page}"
+    try:
+        r = robust_browser_get(url)
+        if r.status_code != 200:
+            return []
+        soup = BeautifulSoup(r.text, "html.parser")
+        results = []
+        for box in soup.select("div.video-img-box"):
+            a = box.find("a", href=True)
+            img = box.find("img")
+            title_el = box.find_next("h6") or box.find("h6")
+            dur_el = box.find("span", class_="label")
+            if not a:
+                continue
+            v_url = a["href"]
+            cover = img.get("data-src") or img.get("src") if img else ""
+            title = title_el.text.strip() if title_el else ""
+            dur = dur_el.text.strip() if dur_el else ""
+            mid = v_url.rstrip("/").split("/")[-1].upper()
+            results.append({
+                "id": mid,
+                "title": title,
+                "url": v_url,
+                "cover": cover,
+                "duration": dur,
+                "source": "JableTV"
+            })
+        return results
+    except Exception as e:
+        log_global(f"Jable 搜尋失敗 ({query}): {e}")
+        return []
+
+def fetch_jable_actresses(page=1):
+    url = "https://jable.tv/models/"
+    if page > 1:
+        url = f"{url}?from={page}"
+    try:
+        r = robust_browser_get(url)
+        if r.status_code != 200:
+            return []
+        soup = BeautifulSoup(r.text, "html.parser")
+        actresses = []
+        for card in soup.select("div.col-6, div.col-md-3, div.col-xl-2"):
+            a = card.find("a", href=True)
+            if not a or "/models/" not in a["href"]:
+                continue
+            img = card.find("img")
+            h4 = card.find(["h4", "h5", "h6"])
+            sub = card.find(["p", "span", "small"])
+            name = h4.text.strip() if h4 else a.text.strip()
+            avatar = img.get("data-src") or img.get("src") if img else ""
+            video_count = sub.text.strip() if sub else ""
+            if name and a["href"] != "https://jable.tv/models/":
+                actresses.append({
+                    "name": name,
+                    "url": a["href"],
+                    "avatar": avatar,
+                    "video_count": video_count,
+                    "source": "JableTV"
+                })
+        return actresses
+    except Exception as e:
+        log_global(f"Jable 女優清單抓取失敗: {e}")
+        return []
+
+def fetch_jable_actress_videos(actress_url, page=1):
+    url = actress_url
+    if page > 1:
+        sep = "&" if "?" in url else "?"
+        url = f"{url}{sep}from={page}"
+    try:
+        r = robust_browser_get(url)
+        if r.status_code != 200:
+            return []
+        soup = BeautifulSoup(r.text, "html.parser")
+        results = []
+        for box in soup.select("div.video-img-box"):
+            a = box.find("a", href=True)
+            img = box.find("img")
+            title_el = box.find_next("h6") or box.find("h6")
+            dur_el = box.find("span", class_="label")
+            if not a:
+                continue
+            v_url = a["href"]
+            cover = img.get("data-src") or img.get("src") if img else ""
+            title = title_el.text.strip() if title_el else ""
+            dur = dur_el.text.strip() if dur_el else ""
+            mid = v_url.rstrip("/").split("/")[-1].upper()
+            results.append({
+                "id": mid,
+                "title": title,
+                "url": v_url,
+                "cover": cover,
+                "duration": dur,
+                "source": "JableTV"
+            })
+        return results
+    except Exception as e:
+        log_global(f"Jable 女優影片抓取失敗 ({actress_url}): {e}")
+        return []
+
+def fetch_missav_videos(cat="today-hot", page=1):
+    urls = {
+        "today-hot": "https://missav.ai/today-hot",
+        "weekly-hot": "https://missav.ai/weekly-hot",
+        "monthly-hot": "https://missav.ai/monthly-hot",
+        "latest": "https://missav.ai/new",
+        "chinese": "https://missav.ai/chinese-subtitle",
+        "uncensored": "https://missav.ai/uncensored-leak",
+    }
+    url = urls.get(cat, "https://missav.ai/today-hot")
+    if page > 1:
+        sep = "&" if "?" in url else "?"
+        url = f"{url}{sep}page={page}"
+    try:
+        r = robust_browser_get(url)
+        if r.status_code != 200:
+            return []
+        soup = BeautifulSoup(r.text, "html.parser")
+        results = []
+        for item in soup.select("div.thumbnail"):
+            a = item.find("a", href=True)
+            img = item.find("img")
+            card = item.parent
+            title_link = card.find("a", class_="text-secondary") or card.find("a", class_="text-nord4") or card.find("a", href=True)
+            dur_el = item.find("span")
+            if not a:
+                continue
+            v_url = a["href"]
+            cover = img.get("data-src") or img.get("src") if img else ""
+            title = title_link.text.strip() if title_link else (img.get("alt") if img else "")
+            dur = dur_el.text.strip() if dur_el else ""
+            mid = v_url.rstrip("/").split("/")[-1].upper()
+            results.append({
+                "id": mid,
+                "title": title,
+                "url": v_url,
+                "cover": cover,
+                "duration": dur,
+                "source": "MissAV"
+            })
+        return results
+    except Exception as e:
+        log_global(f"MissAV 分類抓取失敗 ({cat}): {e}")
+        return []
+
+def search_missav_videos(query, page=1):
+    q = urllib.parse.quote(query.strip())
+    url = f"https://missav.ai/search/{q}"
+    if page > 1:
+        url = f"{url}?page={page}"
+    try:
+        r = robust_browser_get(url)
+        if r.status_code != 200:
+            return []
+        soup = BeautifulSoup(r.text, "html.parser")
+        results = []
+        for item in soup.select("div.thumbnail"):
+            a = item.find("a", href=True)
+            img = item.find("img")
+            card = item.parent
+            title_link = card.find("a", class_="text-secondary") or card.find("a", class_="text-nord4") or card.find("a", href=True)
+            dur_el = item.find("span")
+            if not a:
+                continue
+            v_url = a["href"]
+            cover = img.get("data-src") or img.get("src") if img else ""
+            title = title_link.text.strip() if title_link else (img.get("alt") if img else "")
+            dur = dur_el.text.strip() if dur_el else ""
+            mid = v_url.rstrip("/").split("/")[-1].upper()
+            results.append({
+                "id": mid,
+                "title": title,
+                "url": v_url,
+                "cover": cover,
+                "duration": dur,
+                "source": "MissAV"
+            })
+        return results
+    except Exception as e:
+        log_global(f"MissAV 搜尋失敗 ({query}): {e}")
+        return []
+
+def fetch_missav_actresses(page=1):
+    url = "https://missav.ai/actresses"
+    if page > 1:
+        url = f"{url}?page={page}"
+    try:
+        r = robust_browser_get(url)
+        if r.status_code != 200:
+            return []
+        soup = BeautifulSoup(r.text, "html.parser")
+        actresses = []
+        for a in soup.select("a"):
+            href = a.get("href", "")
+            if "/actresses/" in href and not href.endswith("/ranking"):
+                img = a.find("img")
+                name = a.text.strip()
+                avatar = img.get("data-src") or img.get("src") if img else ""
+                if name:
+                    actresses.append({
+                        "name": name,
+                        "url": href,
+                        "avatar": avatar,
+                        "video_count": "",
+                        "source": "MissAV"
+                    })
+        return actresses
+    except Exception as e:
+        log_global(f"MissAV 女優清單抓取失敗: {e}")
+        return []
+
+def fetch_missav_actress_videos(actress_url, page=1):
+    url = actress_url
+    if page > 1:
+        sep = "&" if "?" in url else "?"
+        url = f"{url}{sep}page={page}"
+    try:
+        r = robust_browser_get(url)
+        if r.status_code != 200:
+            return []
+        soup = BeautifulSoup(r.text, "html.parser")
+        results = []
+        for item in soup.select("div.thumbnail"):
+            a = item.find("a", href=True)
+            img = item.find("img")
+            card = item.parent
+            title_link = card.find("a", class_="text-secondary") or card.find("a", class_="text-nord4") or card.find("a", href=True)
+            dur_el = item.find("span")
+            if not a:
+                continue
+            v_url = a["href"]
+            cover = img.get("data-src") or img.get("src") if img else ""
+            title = title_link.text.strip() if title_link else (img.get("alt") if img else "")
+            dur = dur_el.text.strip() if dur_el else ""
+            mid = v_url.rstrip("/").split("/")[-1].upper()
+            results.append({
+                "id": mid,
+                "title": title,
+                "url": v_url,
+                "cover": cover,
+                "duration": dur,
+                "source": "MissAV"
+            })
+        return results
+    except Exception as e:
+        log_global(f"MissAV 女優影片抓取失敗 ({actress_url}): {e}")
+        return []
+
+
 # ==================== 下載背景服務 ====================
 
 def worker():
@@ -1093,6 +1436,295 @@ div.desktop-only { display: block; }
     font-size: 13px;
     text-align: center;
   }
+
+  /* 行動端影音探索網格為 2 欄 */
+  .media-grid {
+    grid-template-columns: 1fr 1fr !important;
+    gap: 8px !important;
+  }
+  .media-card-title {
+    font-size: 12px !important;
+    -webkit-line-clamp: 2 !important;
+  }
+  .actress-grid {
+    grid-template-columns: repeat(3, 1fr) !important;
+    gap: 8px !important;
+  }
+}
+
+/* ================= 線上探索專區樣式 ================= */
+.explore-nav {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 2px solid #edf2f7;
+  padding-bottom: 8px;
+  margin-bottom: 14px;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.explore-tabs {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.tab-btn {
+  padding: 8px 14px;
+  font-size: 14px;
+  font-weight: 600;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: #4a5568;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.tab-btn:hover { background: #edf2f7; color: #2b6cb0; }
+.tab-btn.active {
+  background: #ebf8ff;
+  color: #2b6cb0;
+  border-color: #bee3f8;
+}
+
+.source-switcher {
+  display: flex;
+  background: #edf2f7;
+  padding: 3px;
+  border-radius: 8px;
+}
+.source-btn {
+  padding: 5px 12px;
+  font-size: 12px;
+  font-weight: bold;
+  border-radius: 6px;
+  border: 0;
+  background: transparent;
+  color: #718096;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.source-btn.active {
+  background: white;
+  color: #2d3748;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+}
+
+.category-bar {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 8px;
+  margin-bottom: 14px;
+  -webkit-overflow-scrolling: touch;
+}
+.cat-pill {
+  padding: 6px 12px;
+  font-size: 13px;
+  font-weight: 500;
+  border-radius: 20px;
+  background: #f7fafc;
+  color: #4a5568;
+  border: 1px solid #e2e8f0;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.cat-pill:hover { background: #edf2f7; }
+.cat-pill.active {
+  background: #2b6cb0;
+  color: white;
+  border-color: #2b6cb0;
+}
+
+.batch-floating-bar {
+  display: none;
+  background: #2b6cb0;
+  color: white;
+  padding: 10px 14px;
+  border-radius: 8px;
+  margin-bottom: 12px;
+  justify-content: space-between;
+  align-items: center;
+  box-shadow: 0 4px 12px rgba(43,108,176,0.25);
+}
+
+.media-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  gap: 14px;
+}
+.media-card {
+  background: white;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  transition: transform 0.2s, box-shadow 0.2s;
+  position: relative;
+}
+.media-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+}
+.media-thumb-wrap {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  background: #1a202c;
+  overflow: hidden;
+}
+.media-thumb {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.media-card-chk {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 22px;
+  height: 22px;
+  cursor: pointer;
+  accent-color: #2b6cb0;
+  z-index: 2;
+}
+.media-duration {
+  position: absolute;
+  bottom: 6px;
+  right: 6px;
+  background: rgba(0,0,0,0.75);
+  color: white;
+  font-size: 11px;
+  padding: 2px 5px;
+  border-radius: 4px;
+  font-weight: 500;
+}
+.media-source-tag {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  background: rgba(0,0,0,0.65);
+  backdrop-filter: blur(4px);
+  color: #fff;
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-weight: 600;
+}
+.media-card-body {
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+}
+.media-card-code {
+  font-size: 11px;
+  font-weight: bold;
+  color: #2b6cb0;
+  margin-bottom: 4px;
+  text-overflow: ellipsis;
+  overflow: hidden;
+  white-space: nowrap;
+}
+.media-card-title {
+  font-size: 13px;
+  color: #2d3748;
+  font-weight: 600;
+  line-height: 1.35;
+  margin-bottom: 8px;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  flex: 1;
+}
+.btn-quick-download {
+  width: 100%;
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: 6px;
+  background: #ebf8ff;
+  color: #2b6cb0;
+  border: 1px solid #bee3f8;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.btn-quick-download:hover {
+  background: #2b6cb0;
+  color: white;
+}
+.btn-quick-download.added {
+  background: #f0fff4;
+  color: #276749;
+  border-color: #9ae6b4;
+  pointer-events: none;
+}
+
+/* 女優清單網格 */
+.actress-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+  gap: 12px;
+}
+.actress-card {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 12px 8px;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.actress-card:hover {
+  background: #ebf8ff;
+  border-color: #bee3f8;
+  transform: translateY(-2px);
+}
+.actress-avatar {
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  object-fit: cover;
+  margin: 0 auto 8px auto;
+  display: block;
+  border: 2px solid #e2e8f0;
+  background: #edf2f7;
+}
+.actress-name {
+  font-size: 13px;
+  font-weight: bold;
+  color: #2d3748;
+  margin-bottom: 2px;
+}
+.actress-count {
+  font-size: 11px;
+  color: #718096;
+}
+
+/* Toast 提示 */
+.toast-msg {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  background: #2b6cb0;
+  color: white;
+  padding: 12px 20px;
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.2);
+  font-size: 14px;
+  font-weight: bold;
+  z-index: 9999;
+  opacity: 0;
+  transform: translateY(10px);
+  transition: all 0.3s;
+  pointer-events: none;
+}
+.toast-msg.show {
+  opacity: 1;
+  transform: translateY(0);
 }
 </style>
 </head>
@@ -1173,17 +1805,82 @@ div.desktop-only { display: block; }
   </div>
 </div>
 
-<!-- 新增下載任務 -->
+<!-- 線上影音探索 ＆ 一鍵下載中心 -->
 <div class="card">
-  <h2>新增下載任務</h2>
-  <div class="path-info">下載目標：<code>{{ host_download_dir }}</code>（僅下載純影像檔）</div>
-  <form method="post" action="/add" style="margin-top: 10px;">
-    <textarea name="urls" placeholder="貼上 Jable / MissAV 網址，一行一個..." required></textarea>
-    <div style="margin-top: 10px;">
-      <button type="submit" class="btn-primary btn-submit-task">加入下載佇列</button>
+  <div class="explore-nav">
+    <div class="explore-tabs">
+      <button type="button" class="tab-btn active" onclick="switchExploreTab('trending', this)">🔥 熱門排行</button>
+      <button type="button" class="tab-btn" onclick="switchExploreTab('actresses', this)">💃 人氣女優</button>
+      <button type="button" class="tab-btn" onclick="switchExploreTab('search', this)">🔍 關鍵字搜尋</button>
+      <button type="button" class="tab-btn" onclick="switchExploreTab('manual', this)">📋 傳統貼網址</button>
     </div>
-  </form>
+    <div class="source-switcher">
+      <button type="button" class="source-btn active" id="src-jable" onclick="setExploreSource('jable')">JableTV</button>
+      <button type="button" class="source-btn" id="src-missav" onclick="setExploreSource('missav')">MissAV</button>
+    </div>
+  </div>
+
+  <!-- 批次下載操作浮動列 -->
+  <div id="batch-bar" class="batch-floating-bar">
+    <div style="font-weight:600;"><span id="batch-selected-count">0</span> 部影片已勾選</div>
+    <div style="display:flex;gap:8px;">
+      <button type="button" class="btn-success" style="padding:6px 12px;font-size:13px;" onclick="addSelectedToQueue()">📦 批次加入下載佇列</button>
+      <button type="button" class="btn-secondary" style="padding:6px 10px;font-size:13px;" onclick="clearExploreSelection()">✕ 取消</button>
+    </div>
+  </div>
+
+  <!-- 1. 熱門排行面板 -->
+  <div id="panel-trending">
+    <div class="category-bar">
+      <button type="button" class="cat-pill active" onclick="setCategory('today-hot', this)">🔥 今日熱門</button>
+      <button type="button" class="cat-pill" onclick="setCategory('weekly-hot', this)">🌟 本週熱門</button>
+      <button type="button" class="cat-pill" onclick="setCategory('monthly-hot', this)">🏆 本月熱門</button>
+      <button type="button" class="cat-pill" onclick="setCategory('latest', this)">🆕 最新上架</button>
+      <button type="button" class="cat-pill" onclick="setCategory('chinese', this)">🀄 中文字幕</button>
+      <button type="button" class="cat-pill" onclick="setCategory('uncensored', this)">🔓 無碼流出</button>
+    </div>
+    <div id="trending-grid" class="media-grid">
+      <div style="grid-column: 1 / -1; text-align: center; color: #a0aec0; padding: 40px;">載入影片中...</div>
+    </div>
+  </div>
+
+  <!-- 2. 人氣女優面板 -->
+  <div id="panel-actresses" style="display: none;">
+    <div id="actress-breadcrumb" style="display:none;margin-bottom:12px;align-items:center;justify-content:space-between;background:#ebf8ff;padding:8px 12px;border-radius:8px;">
+      <div style="font-weight:bold;color:#2b6cb0;">🌸 當前女優：<span id="current-actress-title"></span></div>
+      <button type="button" class="btn-secondary" style="padding:3px 8px;font-size:12px;" onclick="backToActressList()">✕ 返回女優榜</button>
+    </div>
+    <div id="actress-grid" class="actress-grid">
+      <div style="grid-column: 1 / -1; text-align: center; color: #a0aec0; padding: 40px;">載入女優列表中...</div>
+    </div>
+    <div id="actress-videos-grid" class="media-grid" style="display:none;"></div>
+  </div>
+
+  <!-- 3. 關鍵字搜尋面板 -->
+  <div id="panel-search" style="display: none;">
+    <div style="display:flex;gap:8px;margin-bottom:14px;">
+      <input type="text" id="explore-search-input" placeholder="輸入番號 (如 SSIS-001)、女優名或關鍵字..." onkeydown="if(event.key==='Enter') executeExploreSearch()" style="flex:1;">
+      <button type="button" class="btn-primary" onclick="executeExploreSearch()" style="min-width:80px;">🔍 搜尋</button>
+    </div>
+    <div id="search-grid" class="media-grid">
+      <div style="grid-column: 1 / -1; text-align: center; color: #a0aec0; padding: 40px;">請在上方輸入關鍵字開始搜尋</div>
+    </div>
+  </div>
+
+  <!-- 4. 傳統手動貼網址面板 -->
+  <div id="panel-manual" style="display: none;">
+    <div class="path-info">下載目標：<code>{{ host_download_dir }}</code>（僅下載純影像檔）</div>
+    <form method="post" action="/add" style="margin-top: 10px;">
+      <textarea name="urls" placeholder="貼上 Jable / MissAV 網址，一行一個..." required></textarea>
+      <div style="margin-top: 10px;">
+        <button type="submit" class="btn-primary btn-submit-task">加入下載佇列</button>
+      </div>
+    </form>
+  </div>
 </div>
+
+<!-- 浮動提示 Toast -->
+<div id="toast" class="toast-msg"></div>
 
 <!-- 下載狀態管理 -->
 <div class="card">
@@ -1709,9 +2406,258 @@ async function deleteSelectedUnscraped() {
   refreshUnscraped();
 }
 
+// ================= 線上影音探索交互邏輯 =================
+let exploreSource = 'jable';
+let exploreTab = 'trending';
+let exploreCategory = 'today-hot';
+const exploreSelectedUrls = new Set();
+let loadedActresses = false;
+
+function showToast(msg) {
+  const t = document.getElementById("toast");
+  if (!t) return;
+  t.innerText = msg;
+  t.classList.add("show");
+  setTimeout(() => t.classList.remove("show"), 2800);
+}
+
+function switchExploreTab(tab, btnEl) {
+  exploreTab = tab;
+  document.querySelectorAll(".tab-btn").forEach(b => b.classList.remove("active"));
+  if (btnEl) {
+    btnEl.classList.add("active");
+  } else {
+    const el = document.querySelector(`.tab-btn[onclick*="${tab}"]`);
+    if (el) el.classList.add("active");
+  }
+
+  document.getElementById("panel-trending").style.display = tab === "trending" ? "block" : "none";
+  document.getElementById("panel-actresses").style.display = tab === "actresses" ? "block" : "none";
+  document.getElementById("panel-search").style.display = tab === "search" ? "block" : "none";
+  document.getElementById("panel-manual").style.display = tab === "manual" ? "block" : "none";
+
+  if (tab === "actresses" && !loadedActresses) {
+    loadExploreActresses();
+  }
+}
+
+function setExploreSource(src) {
+  exploreSource = src;
+  document.getElementById("src-jable").classList.toggle("active", src === "jable");
+  document.getElementById("src-missav").classList.toggle("active", src === "missav");
+  
+  if (exploreTab === "trending") {
+    loadExploreTrending();
+  } else if (exploreTab === "actresses") {
+    loadedActresses = false;
+    loadExploreActresses();
+  } else if (exploreTab === "search") {
+    executeExploreSearch();
+  }
+}
+
+function setCategory(cat, btnEl) {
+  exploreCategory = cat;
+  document.querySelectorAll(".cat-pill").forEach(p => p.classList.remove("active"));
+  btnEl.classList.add("active");
+  loadExploreTrending();
+}
+
+async function loadExploreTrending() {
+  const container = document.getElementById("trending-grid");
+  container.innerHTML = `<div style="grid-column: 1 / -1; text-align: center; color: #a0aec0; padding: 40px;">正在抓取 ${exploreSource === 'jable' ? 'JableTV' : 'MissAV'} 最新熱門影片...</div>`;
+  try {
+    const res = await fetch(`/api/explore/videos?source=${exploreSource}&cat=${exploreCategory}`);
+    const data = await res.json();
+    renderMediaCards("trending-grid", data.videos || []);
+  } catch(e) {
+    container.innerHTML = `<div style="grid-column: 1 / -1; text-align: center; color: #e53e3e; padding: 30px;">載入失敗: ${escapeHtml(e)}</div>`;
+  }
+}
+
+async function loadExploreActresses() {
+  const container = document.getElementById("actress-grid");
+  container.innerHTML = `<div style="grid-column: 1 / -1; text-align: center; color: #a0aec0; padding: 40px;">正在加載 ${exploreSource === 'jable' ? 'JableTV' : 'MissAV'} 人氣女優榜...</div>`;
+  document.getElementById("actress-breadcrumb").style.display = "none";
+  document.getElementById("actress-grid").style.display = "grid";
+  document.getElementById("actress-videos-grid").style.display = "none";
+
+  try {
+    const res = await fetch(`/api/explore/actresses?source=${exploreSource}`);
+    const data = await res.json();
+    const actresses = data.actresses || [];
+    if (actresses.length === 0) {
+      container.innerHTML = `<div style="grid-column: 1 / -1; text-align: center; color: #a0aec0; padding: 30px;">目前未找到女優資料</div>`;
+      return;
+    }
+    container.innerHTML = "";
+    for (const act of actresses) {
+      const card = document.createElement("div");
+      card.className = "actress-card";
+      const proxyAvatar = act.avatar ? `/api/explore/proxy_image?url=${encodeURIComponent(act.avatar)}` : '';
+      const avatarHtml = proxyAvatar ? `<img src="${proxyAvatar}" class="actress-avatar" loading="lazy">` : `<div class="actress-avatar" style="display:flex;align-items:center;justify-content:center;color:#a0aec0;font-size:18px;">👤</div>`;
+      card.innerHTML = `
+        ${avatarHtml}
+        <div class="actress-name">${escapeHtml(act.name)}</div>
+        <div class="actress-count">${escapeHtml(act.video_count || '')}</div>
+      `;
+      card.onclick = () => exploreActressVideos(act.url, act.name);
+      container.appendChild(card);
+    }
+    loadedActresses = true;
+  } catch(e) {
+    container.innerHTML = `<div style="grid-column: 1 / -1; text-align: center; color: #e53e3e; padding: 30px;">載入失敗: ${escapeHtml(e)}</div>`;
+  }
+}
+
+async function exploreActressVideos(actressUrl, actressName) {
+  document.getElementById("actress-grid").style.display = "none";
+  document.getElementById("actress-breadcrumb").style.display = "flex";
+  document.getElementById("current-actress-title").innerText = actressName;
+  const vGrid = document.getElementById("actress-videos-grid");
+  vGrid.style.display = "grid";
+  vGrid.innerHTML = `<div style="grid-column: 1 / -1; text-align: center; color: #a0aec0; padding: 40px;">正在載入 ${escapeHtml(actressName)} 的專屬作品...</div>`;
+
+  try {
+    const res = await fetch(`/api/explore/actress_videos?source=${exploreSource}&url=${encodeURIComponent(actressUrl)}`);
+    const data = await res.json();
+    renderMediaCards("actress-videos-grid", data.videos || []);
+  } catch(e) {
+    vGrid.innerHTML = `<div style="grid-column: 1 / -1; text-align: center; color: #e53e3e; padding: 30px;">作品載入失敗: ${escapeHtml(e)}</div>`;
+  }
+}
+
+function backToActressList() {
+  document.getElementById("actress-grid").style.display = "grid";
+  document.getElementById("actress-breadcrumb").style.display = "none";
+  document.getElementById("actress-videos-grid").style.display = "none";
+}
+
+async function executeExploreSearch() {
+  const query = document.getElementById("explore-search-input").value.trim();
+  if (!query) {
+    alert("請輸入搜尋關鍵字！");
+    return;
+  }
+  const container = document.getElementById("search-grid");
+  container.innerHTML = `<div style="grid-column: 1 / -1; text-align: center; color: #a0aec0; padding: 40px;">正在多站搜尋「${escapeHtml(query)}」...</div>`;
+
+  try {
+    const res = await fetch(`/api/explore/search?source=${exploreSource}&query=${encodeURIComponent(query)}`);
+    const data = await res.json();
+    renderMediaCards("search-grid", data.videos || []);
+  } catch(e) {
+    container.innerHTML = `<div style="grid-column: 1 / -1; text-align: center; color: #e53e3e; padding: 30px;">搜尋失敗: ${escapeHtml(e)}</div>`;
+  }
+}
+
+function renderMediaCards(containerId, videos) {
+  const container = document.getElementById(containerId);
+  container.innerHTML = "";
+  if (!videos || videos.length === 0) {
+    container.innerHTML = `<div style="grid-column: 1 / -1; text-align: center; color: #a0aec0; padding: 30px;">查無相關影片</div>`;
+    return;
+  }
+
+  for (const v of videos) {
+    const card = document.createElement("div");
+    card.className = "media-card";
+    const proxyCover = v.cover ? `/api/explore/proxy_image?url=${encodeURIComponent(v.cover)}` : '';
+    const isSelected = exploreSelectedUrls.has(v.url);
+
+    card.innerHTML = `
+      <div class="media-thumb-wrap">
+        <img src="${proxyCover}" class="media-thumb" loading="lazy" onerror="this.src='/favicon.svg'">
+        <input type="checkbox" class="media-card-chk" ${isSelected ? 'checked' : ''} onchange="onExploreChkChange(this, '${escapeHtml(v.url)}')">
+        <span class="media-source-tag">${escapeHtml(v.source)}</span>
+        ${v.duration ? `<span class="media-duration">${escapeHtml(v.duration)}</span>` : ''}
+      </div>
+      <div class="media-card-body">
+        <div class="media-card-code">${escapeHtml(v.id || '')}</div>
+        <div class="media-card-title" title="${escapeHtml(v.title)}">${escapeHtml(v.title)}</div>
+        <button type="button" class="btn-quick-download" onclick="addSingleToQueue('${escapeHtml(v.url)}', this)">➕ 一鍵下載</button>
+      </div>
+    `;
+    container.appendChild(card);
+  }
+}
+
+function onExploreChkChange(chk, url) {
+  if (chk.checked) {
+    exploreSelectedUrls.add(url);
+  } else {
+    exploreSelectedUrls.delete(url);
+  }
+  updateExploreBatchBar();
+}
+
+function updateExploreBatchBar() {
+  const bar = document.getElementById("batch-bar");
+  const countSpan = document.getElementById("batch-selected-count");
+  if (exploreSelectedUrls.size > 0) {
+    bar.style.display = "flex";
+    countSpan.innerText = exploreSelectedUrls.size;
+  } else {
+    bar.style.display = "none";
+  }
+}
+
+function clearExploreSelection() {
+  exploreSelectedUrls.clear();
+  document.querySelectorAll(".media-card-chk").forEach(c => c.checked = false);
+  updateExploreBatchBar();
+}
+
+async function addSingleToQueue(url, btnEl) {
+  btnEl.innerText = "加入中...";
+  btnEl.disabled = true;
+  try {
+    const res = await fetch("/api/add_batch", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({ urls: [url] })
+    });
+    const data = await res.json();
+    if (data.ok) {
+      btnEl.innerText = "✅ 已加入佇列";
+      btnEl.classList.add("added");
+      showToast("🎉 已成功加入下載佇列！");
+      refreshQueue();
+    } else {
+      alert("加入失敗: " + data.message);
+      btnEl.innerText = "➕ 一鍵下載";
+      btnEl.disabled = false;
+    }
+  } catch(e) {
+    alert("連線失敗: " + e);
+    btnEl.innerText = "➕ 一鍵下載";
+    btnEl.disabled = false;
+  }
+}
+
+async function addSelectedToQueue() {
+  const urls = Array.from(exploreSelectedUrls);
+  if (urls.length === 0) return;
+  try {
+    const res = await fetch("/api/add_batch", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({ urls: urls })
+    });
+    const data = await res.json();
+    alert(data.message);
+    clearExploreSelection();
+    showToast(`🎉 成功加入 ${urls.length} 部影片至佇列！`);
+    refreshQueue();
+  } catch(e) {
+    alert("批次加入失敗: " + e);
+  }
+}
+
 loadSettingsFromServer();
 refreshQueue();
 refreshUnscraped();
+loadExploreTrending();
 setInterval(refreshQueue, 3000);
 </script>
 </body>
@@ -2100,6 +3046,99 @@ def delete_unscraped():
             fail_cnt += 1
 
     return jsonify({"ok": True, "message": f"刪除完成：成功刪除 {deleted_cnt} 部影片" + (f"，失敗 {fail_cnt} 部" if fail_cnt > 0 else "")})
+
+# ==================== 線上探索 API 路由 ====================
+
+@app.route("/api/explore/videos")
+@login_required
+def api_explore_videos():
+    src = request.args.get("source", "jable").lower()
+    cat = request.args.get("cat", "today-hot")
+    page = int(request.args.get("page", 1))
+    if src == "missav":
+        videos = fetch_missav_videos(cat, page)
+    else:
+        videos = fetch_jable_videos(cat, page)
+    return jsonify({"ok": True, "videos": videos, "source": src, "cat": cat, "page": page})
+
+@app.route("/api/explore/search")
+@login_required
+def api_explore_search():
+    src = request.args.get("source", "jable").lower()
+    query = request.args.get("query", "").strip()
+    page = int(request.args.get("page", 1))
+    if not query:
+        return jsonify({"ok": True, "videos": []})
+    if src == "missav":
+        videos = search_missav_videos(query, page)
+    else:
+        videos = search_jable_videos(query, page)
+    return jsonify({"ok": True, "videos": videos, "query": query, "source": src, "page": page})
+
+@app.route("/api/explore/actresses")
+@login_required
+def api_explore_actresses():
+    src = request.args.get("source", "jable").lower()
+    page = int(request.args.get("page", 1))
+    if src == "missav":
+        actresses = fetch_missav_actresses(page)
+    else:
+        actresses = fetch_jable_actresses(page)
+    return jsonify({"ok": True, "actresses": actresses, "source": src, "page": page})
+
+@app.route("/api/explore/actress_videos")
+@login_required
+def api_explore_actress_videos():
+    src = request.args.get("source", "jable").lower()
+    actress_url = request.args.get("url", "").strip()
+    page = int(request.args.get("page", 1))
+    if not actress_url:
+        return jsonify({"ok": True, "videos": []})
+    if src == "missav" or "missav" in actress_url:
+        videos = fetch_missav_actress_videos(actress_url, page)
+    else:
+        videos = fetch_jable_actress_videos(actress_url, page)
+    return jsonify({"ok": True, "videos": videos, "url": actress_url, "page": page})
+
+@app.route("/api/explore/proxy_image")
+def api_explore_proxy_image():
+    img_url = request.args.get("url", "")
+    if not img_url:
+        return Response("", status=404)
+    referer = "https://jable.tv/" if "jable" in img_url else "https://missav.ai/"
+    try:
+        r = robust_browser_get(img_url, referer=referer, timeout=8)
+        if r.status_code == 200:
+            c_type = r.headers.get("Content-Type", "image/jpeg")
+            resp = Response(r.content, mimetype=c_type)
+            resp.headers["Cache-Control"] = "public, max-age=86400"
+            return resp
+    except Exception:
+        pass
+    return Response("", status=404)
+
+@app.route("/api/add_batch", methods=["POST"])
+@login_required
+def api_add_batch():
+    data = request.json or {}
+    urls = data.get("urls", [])
+    if isinstance(urls, str):
+        urls = [urls]
+    valid_urls = [u.strip() for u in urls if u and u.strip().startswith("http")]
+    if not valid_urls:
+        return jsonify({"ok": False, "message": "未提供有效網址"})
+    with lock:
+        queue = load_queue()
+        added_count = 0
+        for u in valid_urls:
+            item_id = str(int(time.time() * 1000)) + "_" + str(len(queue))
+            queue.append({
+                "id": item_id, "url": u, "status": "waiting", "message": "等待下載",
+                "progress": 0, "added_at": now(), "started_at": "", "finished_at": "", "logs": []
+            })
+            added_count += 1
+        save_queue(queue)
+    return jsonify({"ok": True, "message": f"成功加入 {added_count} 部影片至下載佇列！", "count": added_count})
 
 
 if __name__ == "__main__":

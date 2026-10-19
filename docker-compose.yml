@@ -22,5 +22,5 @@ services:
       - HOST_MEDIA_DIR=/volume1/xVideo/JAVDB_DATA
       - RESOLUTION=highest
       - TZ=Asia/Taipei
-    # 容器啟動時自動安裝刮削、圖片處理與 Web 依賴
-    entrypoint: ["sh", "-c", "pip install --no-cache-dir flask beautifulsoup4 pillow requests && python -u /app/app.py"]
+    # 容器啟動時自動安裝刮削、圖片處理、Cloudflare 繞過與 Web 依賴
+    entrypoint: ["sh", "-c", "pip install --no-cache-dir flask beautifulsoup4 pillow requests curl_cffi && python -u /app/app.py"]
