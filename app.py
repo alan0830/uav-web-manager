@@ -895,6 +895,9 @@ div.desktop-only { display: block; }
     overflow: hidden;
     text-overflow: ellipsis;
   }
+  .unscraped-top-actions button.btn-batch-del {
+    grid-column: span 2;
+  }
 
   /* 清空佇列按鈕與送出任務按鈕全寬化 */
   .queue-clear-btn, .btn-submit-task {
@@ -1219,16 +1222,20 @@ div.desktop-only { display: block; }
       <button class="btn-primary" onclick="scrapeAllPreview()">🔍 全部刮削預覽</button>
       <button class="btn-success" onclick="commitSelected()">📦 勾選批次入庫</button>
       <button class="btn-success" onclick="commitAll()">🚀 一鍵全部入庫</button>
+      <button class="btn-danger btn-batch-del" onclick="deleteSelectedUnscraped()">🗑️ 勾選批次刪除</button>
     </div>
   </div>
 
   <!-- 手機專屬快速全選工具列 -->
   <div class="mobile-select-bar mobile-only">
-    <label style="display:flex;align-items:center;gap:6px;cursor:pointer;user-select:none;">
-      <input type="checkbox" id="select-all-mobile" onclick="toggleSelectAll(this)">
-      <strong>全選所有影片</strong>
-    </label>
-    <span id="select-summary-mobile" style="color:#718096;font-size:12px;"></span>
+    <div style="display:flex;align-items:center;gap:6px;">
+      <label style="display:flex;align-items:center;gap:6px;cursor:pointer;user-select:none;">
+        <input type="checkbox" id="select-all-mobile" onclick="toggleSelectAll(this)">
+        <strong>全選</strong>
+      </label>
+      <span id="select-summary-mobile" style="color:#718096;font-size:12px;"></span>
+    </div>
+    <button class="btn-danger" style="padding:4px 8px;font-size:12px;" onclick="deleteSelectedUnscraped()">🗑️ 刪除已選</button>
   </div>
 
   <div class="table-responsive">
@@ -1495,15 +1502,16 @@ async function refreshUnscraped() {
     tr.innerHTML = `
       <!-- 手機端專屬精美卡片佈局 -->
       <td class="mobile-only" style="width:100%;">
-        <!-- 頂部列：核取方塊 + 番號 + 狀態 + 大小 -->
+        <!-- 頂部列：核取方塊 + 番號 + 狀態 + 大小 + 刪除按鈕 -->
         <div class="u-card-header">
           <div class="u-card-header-left">
             <input type="checkbox" class="file-chk" value="${escapeHtml(f.rel_path)}" ${isReady ? 'checked' : ''} onchange="onCheckboxChange(this, '${escapeHtml(f.rel_path)}')">
             <span class="badge">${escapeHtml(f.movie_id)}</span>
+            <span style="font-size:12px;color:#718096;">${f.size_mb} MB</span>
           </div>
-          <div>
-            <span style="font-size:12px;color:#718096;margin-right:6px;">${f.size_mb} MB</span>
-            <span class="${isReady ? 'done' : 'waiting'}">${isReady ? '✅ 預覽完成' : '⏳ 待刮削'}</span>
+          <div style="display:flex;align-items:center;gap:6px;">
+            <span class="${isReady ? 'done' : 'waiting'}" style="font-size:12px;">${isReady ? '✅ 預覽完成' : '⏳ 待刮削'}</span>
+            <button class="btn-danger" style="padding:2px 8px;font-size:11px;" onclick="deleteSingleUnscraped('${escapeHtml(f.rel_path)}')">🗑️ 刪除</button>
           </div>
         </div>
 
@@ -1555,6 +1563,7 @@ async function refreshUnscraped() {
         <div class="action-gap">
           <button class="btn-primary" style="padding:6px 10px;" onclick="previewSingle(this, '${escapeHtml(f.rel_path)}')">🔍 刮削預覽</button>
           <button class="btn-success" style="padding:6px 10px;" ${!isReady ? 'disabled' : ''} onclick="commitSingle('${escapeHtml(f.rel_path)}')">📦 確認入庫</button>
+          <button class="btn-danger" style="padding:6px 10px;" onclick="deleteSingleUnscraped('${escapeHtml(f.rel_path)}')">🗑️ 刪除</button>
         </div>
       </td>
     `;
@@ -1660,6 +1669,43 @@ async function commitAll() {
   });
   const data = await res.json();
   alert(data.message);
+  refreshUnscraped();
+}
+
+async function deleteSingleUnscraped(rel_path) {
+  if (!confirm(`確定要刪除待整理影片【${rel_path}】？\n⚠️ 此動作將永久刪除下載資料夾中的實體影片檔案，無法復原！`)) return;
+  try {
+    const res = await fetch("/api/delete_unscraped", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({ rel_paths: [rel_path] })
+    });
+    const data = await res.json();
+    alert(data.message);
+  } catch(e) {
+    alert("刪除失敗: " + e);
+  }
+  refreshUnscraped();
+}
+
+async function deleteSelectedUnscraped() {
+  const selected = Array.from(new Set(Array.from(document.querySelectorAll(".file-chk:checked")).map(c => c.value)));
+  if (selected.length === 0) {
+    alert("請先勾選要刪除的項目！");
+    return;
+  }
+  if (!confirm(`確定要永久刪除已勾選的 ${selected.length} 部影片檔案？\n⚠️ 此動作將從硬碟永久刪除檔案，無法復原！`)) return;
+  try {
+    const res = await fetch("/api/delete_unscraped", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({ rel_paths: selected })
+    });
+    const data = await res.json();
+    alert(data.message);
+  } catch(e) {
+    alert("刪除失敗: " + e);
+  }
   refreshUnscraped();
 }
 
@@ -2010,6 +2056,50 @@ def commit_organize():
         log_global(f"成功入庫整理：{target_rel} [來源: {meta.get('source')}]")
 
     return jsonify({"ok": True, "message": f"入庫完成：成功 {success_cnt} 部，失敗/略過 {fail_cnt} 部"})
+
+@app.route("/api/delete_unscraped", methods=["POST"])
+@login_required
+def delete_unscraped():
+    data = request.json or {}
+    rel_paths = data.get("rel_paths", [])
+    if isinstance(rel_paths, str):
+        rel_paths = [rel_paths]
+    if not rel_paths:
+        return jsonify({"ok": False, "message": "未選取要刪除的檔案"})
+
+    video_exts = {".mp4", ".mkv", ".avi", ".ts", ".wmv", ".mov", ".m4v"}
+    deleted_cnt = 0
+    fail_cnt = 0
+
+    for rel_p in rel_paths:
+        full_path = os.path.abspath(os.path.join(DOWNLOAD_DIR, rel_p))
+        # 安全邊界檢查，防止路徑穿越 (Path Traversal)
+        if not full_path.startswith(os.path.abspath(DOWNLOAD_DIR)):
+            fail_cnt += 1
+            continue
+
+        if os.path.exists(full_path) and os.path.isfile(full_path):
+            try:
+                os.remove(full_path)
+                SCRAPED_CACHE.pop(rel_p, None)
+                deleted_cnt += 1
+
+                # 若所在子資料夾已無其他影片檔，自動清理該空資料夾
+                parent_dir = os.path.dirname(full_path)
+                if parent_dir != os.path.abspath(DOWNLOAD_DIR) and os.path.exists(parent_dir):
+                    has_other = False
+                    for _, _, flist in os.walk(parent_dir):
+                        if any(os.path.splitext(x)[1].lower() in video_exts for x in flist):
+                            has_other = True
+                            break
+                    if not has_other:
+                        shutil.rmtree(parent_dir, ignore_errors=True)
+            except Exception:
+                fail_cnt += 1
+        else:
+            fail_cnt += 1
+
+    return jsonify({"ok": True, "message": f"刪除完成：成功刪除 {deleted_cnt} 部影片" + (f"，失敗 {fail_cnt} 部" if fail_cnt > 0 else "")})
 
 
 if __name__ == "__main__":
